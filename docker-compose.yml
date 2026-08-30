@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  pipeline:
+    build: .
+    volumes:
+      - ./data:/app/data
+      - ./metrics:/app/metrics
+      - ./.env:/app/.env:ro
+    environment:
+      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-}
+      - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    command: python run_pipeline.py --force-disagreement --records 50
+    profiles:
+      - run
+
+  dashboard:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./metrics:/app/metrics
+      - ./audit_trail.db:/app/audit_trail.db
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: streamlit run dashboard/app.py --server.address=0.0.0.0 --server.port=8501
+    depends_on:
+      - pipeline
+    profiles:
+      - dashboard
+
+  all-in-one:
+    build: .
+    ports:
+      - "8501:8501"
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./metrics:/app/metrics
+      - ./.env:/app/.env:ro
+    environment:
+      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-}
+      - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - PYTHONUNBUFFERED=1
+    # Run pipeline first, then start dashboard and API server
+    command: >
+      sh -c "python run_pipeline.py --force-disagreement --records 50 && 
+             (streamlit run dashboard/app.py --server.address=0.0.0.0 --server.port=8501 &
+              uvicorn api.app:app --host 0.0.0.0 --port 8000)"
+    profiles:
+      - all
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./metrics:/app/metrics
+      - ./.env:/app/.env:ro
+    environment:
+      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-}
+      - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - PYTHONUNBUFFERED=1
+    command: uvicorn api.app:app --host 0.0.0.0 --port 8000
+    profiles:
+      - api

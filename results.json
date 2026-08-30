@@ -1,0 +1,780 @@
+[
+  {
+    "type": "low_confidence",
+    "settlement": {
+      "entity_id": "settle_001",
+      "type": "payment",
+      "payment_id": "pay_sample_001",
+      "order_id": "ORD_sample_001",
+      "amount": 50000,
+      "fee": 1000,
+      "tax": 180,
+      "currency": "INR",
+      "settled": 48820,
+      "settlement_id": "set_001",
+      "settlement_utr": "UTR123456789",
+      "created_at": "2026-09-01T10:00:00Z",
+      "settled_at": "2026-09-02T10:00:00Z",
+      "method": "UPI",
+      "source": "sample_batch",
+      "card_network": NaN,
+      "utr_norm": "utr123456789",
+      "order_norm": "ord_sample_001",
+      "payment_norm": "pay_sample_001"
+    },
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0018",
+      "expected_amount": 14745.66,
+      "order_date": "2026-08-30",
+      "customer_ref": "CUST_5315",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0018",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0018",
+      "payment_norm": "pay_synth_0018"
+    },
+    "confidence": 0.2928571428571428,
+    "rule_fired": "weak_candidate",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "low_confidence",
+    "settlement": {
+      "entity_id": "settle_002",
+      "type": "payment",
+      "payment_id": "pay_sample_002",
+      "order_id": "ORD_sample_002",
+      "amount": 125000,
+      "fee": 2500,
+      "tax": 450,
+      "currency": "INR",
+      "settled": 122050,
+      "settlement_id": "set_002",
+      "settlement_utr": "UTR987654321",
+      "created_at": "2026-09-01T11:00:00Z",
+      "settled_at": "2026-09-02T11:00:00Z",
+      "method": "Card",
+      "source": "sample_batch",
+      "card_network": "VISA",
+      "utr_norm": "utr987654321",
+      "order_norm": "ord_sample_002",
+      "payment_norm": "pay_sample_002"
+    },
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0018",
+      "expected_amount": 14745.66,
+      "order_date": "2026-08-30",
+      "customer_ref": "CUST_5315",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0018",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0018",
+      "payment_norm": "pay_synth_0018"
+    },
+    "confidence": 0.27142857142857146,
+    "rule_fired": "weak_candidate",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_809570",
+      "amount": 5514.99,
+      "value_date": "2026-08-23",
+      "narration": "NEFT/IMPS - UTR770487 - ORD_SYNTH_0000",
+      "utr": "UTR770487",
+      "reference": "PAY_SYNTH_0000",
+      "source": "synthetic",
+      "utr_norm": "utr770487",
+      "payment_norm": "pay_synth_0000"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_731262",
+      "amount": 29251.13,
+      "value_date": "2026-08-28",
+      "narration": "Rs. 29,565.58 / UTR191161 / ORD_SYNTH_0001",
+      "utr": "UTR191161",
+      "reference": "PAY_SYNTH_0001",
+      "source": "synthetic",
+      "utr_norm": "utr191161",
+      "payment_norm": "pay_synth_0001"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_571029",
+      "amount": 9791.52,
+      "value_date": "2026-08-13",
+      "narration": "NEFT/IMPS - UTR688508 - ORD_SYNTH_0002",
+      "utr": "UTR688508",
+      "reference": "PAY_SYNTH_0002",
+      "source": "synthetic",
+      "utr_norm": "utr688508",
+      "payment_norm": "pay_synth_0002"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_456778",
+      "amount": 42383.48,
+      "value_date": "2026-08-25",
+      "narration": "NEFT/IMPS - UTR948749 - ORD_SYNTH_0003",
+      "utr": "UTR948749",
+      "reference": "PAY_SYNTH_0003",
+      "source": "synthetic",
+      "utr_norm": "utr948749",
+      "payment_norm": "pay_synth_0003"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_476417",
+      "amount": 10570.13,
+      "value_date": "2026-08-27",
+      "narration": "NEFT/IMPS - UTR263032 - ORD_SYNTH_0004",
+      "utr": "UTR263032",
+      "reference": "PAY_SYNTH_0004",
+      "source": "synthetic",
+      "utr_norm": "utr263032",
+      "payment_norm": "pay_synth_0004"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_496922",
+      "amount": 13155.04,
+      "value_date": "2026-08-16",
+      "narration": "NEFT/IMPS - UTR733052 - ORD_SYNTH_0005",
+      "utr": "UTR733052",
+      "reference": "PAY_SYNTH_0005",
+      "source": "synthetic",
+      "utr_norm": "utr733052",
+      "payment_norm": "pay_synth_0005"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_705397",
+      "amount": 14397.11,
+      "value_date": "2026-08-02",
+      "narration": "NEFT/IMPS - UTR678856 - ORD_SYNTH_0006",
+      "utr": "UTR678856",
+      "reference": "PAY_SYNTH_0006",
+      "source": "synthetic",
+      "utr_norm": "utr678856",
+      "payment_norm": "pay_synth_0006"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_183667",
+      "amount": 3487.87,
+      "value_date": "2026-08-06",
+      "narration": "NEFT/IMPS - UTR838797 - ORD_SYNTH_0007",
+      "utr": "UTR838797",
+      "reference": "PAY_SYNTH_0007",
+      "source": "synthetic",
+      "utr_norm": "utr838797",
+      "payment_norm": "pay_synth_0007"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_488162",
+      "amount": 18704.7,
+      "value_date": "2026-08-04",
+      "narration": "NEFT/IMPS - UTR205907 - ORD_SYNTH_0008",
+      "utr": "UTR205907",
+      "reference": "PAY_SYNTH_0008",
+      "source": "synthetic",
+      "utr_norm": "utr205907",
+      "payment_norm": "pay_synth_0008"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_738720",
+      "amount": 32735.52,
+      "value_date": "2026-08-09",
+      "narration": "NEFT/IMPS - UTR319684 - ORD_SYNTH_0009",
+      "utr": "UTR319684",
+      "reference": "PAY_SYNTH_0009",
+      "source": "synthetic",
+      "utr_norm": "utr319684",
+      "payment_norm": "pay_synth_0009"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_771088",
+      "amount": 35999.37,
+      "value_date": "2026-08-18",
+      "narration": "NEFT/IMPS - UTR660086 - ORD_SYNTH_0010",
+      "utr": "UTR660086",
+      "reference": "PAY_SYNTH_0010",
+      "source": "synthetic",
+      "utr_norm": "utr660086",
+      "payment_norm": "pay_synth_0010"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_520651",
+      "amount": 15868.7,
+      "value_date": "2026-08-30",
+      "narration": "NEFT/IMPS - UTR817870 - ORD_SYNTH_0011",
+      "utr": "UTR817870",
+      "reference": "PAY_SYNTH_0011",
+      "source": "synthetic",
+      "utr_norm": "utr817870",
+      "payment_norm": "pay_synth_0011"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_322955",
+      "amount": 10321.33,
+      "value_date": "2026-08-02",
+      "narration": "NEFT/IMPS - UTR169403 - ORD_SYNTH_0012",
+      "utr": "UTR169403",
+      "reference": "PAY_SYNTH_0012",
+      "source": "synthetic",
+      "utr_norm": "utr169403",
+      "payment_norm": "pay_synth_0012"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_358607",
+      "amount": 43234.36,
+      "value_date": "2026-08-26",
+      "narration": "NEFT/IMPS - UTR514850 - ORD_SYNTH_0013",
+      "utr": "UTR514850",
+      "reference": "PAY_SYNTH_0013",
+      "source": "synthetic",
+      "utr_norm": "utr514850",
+      "payment_norm": "pay_synth_0013"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_329974",
+      "amount": 36681.97,
+      "value_date": "2026-08-12",
+      "narration": "NEFT/IMPS - UTR375504 - ORD_SYNTH_0014",
+      "utr": "UTR375504",
+      "reference": "PAY_SYNTH_0014",
+      "source": "synthetic",
+      "utr_norm": "utr375504",
+      "payment_norm": "pay_synth_0014"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_813536",
+      "amount": 24105.42,
+      "value_date": "2026-08-29",
+      "narration": "NEFT/IMPS - UTR634277 - ORD_SYNTH_0015",
+      "utr": "UTR634277",
+      "reference": "PAY_SYNTH_0015",
+      "source": "synthetic",
+      "utr_norm": "utr634277",
+      "payment_norm": "pay_synth_0015"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_680099",
+      "amount": 3212.37,
+      "value_date": "2026-08-16",
+      "narration": "NEFT/IMPS - UTR725380 - ORD_SYNTH_0016",
+      "utr": "UTR725380",
+      "reference": "PAY_SYNTH_0016",
+      "source": "synthetic",
+      "utr_norm": "utr725380",
+      "payment_norm": "pay_synth_0016"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_905934",
+      "amount": 35211.68,
+      "value_date": "2026-08-13",
+      "narration": "NEFT/IMPS - UTR813328 - ORD_SYNTH_0017",
+      "utr": "UTR813328",
+      "reference": "PAY_SYNTH_0017",
+      "source": "synthetic",
+      "utr_norm": "utr813328",
+      "payment_norm": "pay_synth_0017"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_854639",
+      "amount": 14551.56,
+      "value_date": "2026-08-30",
+      "narration": "NEFT/IMPS - UTR216970 - ORD_SYNTH_0018",
+      "utr": "UTR216970",
+      "reference": "PAY_SYNTH_0018",
+      "source": "synthetic",
+      "utr_norm": "utr216970",
+      "payment_norm": "pay_synth_0018"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_bank",
+    "settlement": null,
+    "counterpart": {
+      "txn_id": "TXN_412942",
+      "amount": 37353.61,
+      "value_date": "2026-08-27",
+      "narration": "NEFT/IMPS - UTR624902 - ORD_SYNTH_0019",
+      "utr": "UTR624902",
+      "reference": "PAY_SYNTH_0019",
+      "source": "synthetic",
+      "utr_norm": "utr624902",
+      "payment_norm": "pay_synth_0019"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0000",
+      "expected_amount": 5655.42,
+      "order_date": "2026-08-23",
+      "customer_ref": "CUST_9935",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0000",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0000",
+      "payment_norm": "pay_synth_0000"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0001",
+      "expected_amount": 29565.58,
+      "order_date": "2026-08-28",
+      "customer_ref": "CUST_1434",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0001",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0001",
+      "payment_norm": "pay_synth_0001"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0002",
+      "expected_amount": 10022.0,
+      "order_date": "2026-08-13",
+      "customer_ref": "CUST_5557",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0002",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0002",
+      "payment_norm": "pay_synth_0002"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0003",
+      "expected_amount": 43478.09,
+      "order_date": "2026-08-25",
+      "customer_ref": "CUST_5552",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0003",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0003",
+      "payment_norm": "pay_synth_0003"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0004",
+      "expected_amount": 10844.16,
+      "order_date": "2026-08-27",
+      "customer_ref": "CUST_6635",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0004",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0004",
+      "payment_norm": "pay_synth_0004"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0005",
+      "expected_amount": 13299.59,
+      "order_date": "2026-08-16",
+      "customer_ref": "CUST_2291",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0005",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0005",
+      "payment_norm": "pay_synth_0005"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0006",
+      "expected_amount": 14729.6,
+      "order_date": "2026-08-02",
+      "customer_ref": "CUST_4150",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0006",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0006",
+      "payment_norm": "pay_synth_0006"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0007",
+      "expected_amount": 3570.8,
+      "order_date": "2026-08-06",
+      "customer_ref": "CUST_4814",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0007",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0007",
+      "payment_norm": "pay_synth_0007"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0008",
+      "expected_amount": 19068.3,
+      "order_date": "2026-08-04",
+      "customer_ref": "CUST_6820",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0008",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0008",
+      "payment_norm": "pay_synth_0008"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0009",
+      "expected_amount": 33541.74,
+      "order_date": "2026-08-09",
+      "customer_ref": "CUST_3803",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0009",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0009",
+      "payment_norm": "pay_synth_0009"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0010",
+      "expected_amount": 36483.43,
+      "order_date": "2026-08-18",
+      "customer_ref": "CUST_4598",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0010",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0010",
+      "payment_norm": "pay_synth_0010"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0011",
+      "expected_amount": 16281.71,
+      "order_date": "2026-08-29",
+      "customer_ref": "CUST_5386",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0011",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0011",
+      "payment_norm": "pay_synth_0011"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0012",
+      "expected_amount": 10628.04,
+      "order_date": "2026-08-02",
+      "customer_ref": "CUST_9179",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0012",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0012",
+      "payment_norm": "pay_synth_0012"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0013",
+      "expected_amount": 44245.69,
+      "order_date": "2026-08-26",
+      "customer_ref": "CUST_9830",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0013",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0013",
+      "payment_norm": "pay_synth_0013"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0014",
+      "expected_amount": 37375.99,
+      "order_date": "2026-08-12",
+      "customer_ref": "CUST_3266",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0014",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0014",
+      "payment_norm": "pay_synth_0014"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0015",
+      "expected_amount": 24726.44,
+      "order_date": "2026-08-03",
+      "customer_ref": "CUST_7916",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0015",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0015",
+      "payment_norm": "pay_synth_0015"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0016",
+      "expected_amount": 3270.03,
+      "order_date": "2026-08-16",
+      "customer_ref": "CUST_1188",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0016",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0016",
+      "payment_norm": "pay_synth_0016"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0017",
+      "expected_amount": 36064.02,
+      "order_date": "2026-08-13",
+      "customer_ref": "CUST_6573",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0017",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0017",
+      "payment_norm": "pay_synth_0017"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  },
+  {
+    "type": "unmatched_ledger",
+    "settlement": null,
+    "counterpart": {
+      "order_id": "ORD_SYNTH_0019",
+      "expected_amount": 38121.91,
+      "order_date": "2026-08-27",
+      "customer_ref": "CUST_9317",
+      "status": "completed",
+      "payment_id": "PAY_SYNTH_0019",
+      "source": "synthetic",
+      "order_norm": "ord_synth_0019",
+      "payment_norm": "pay_synth_0019"
+    },
+    "confidence": 0.0,
+    "rule_fired": "no_candidate_found",
+    "final_status": "unresolved_exception"
+  }
+]

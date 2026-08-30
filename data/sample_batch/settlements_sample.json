@@ -1,0 +1,41 @@
+{
+  "description": "Sample batch for zero-setup demo. Contains synthetic data mimicking Razorpay settlements format.",
+  "settlements_sample": [
+    {
+      "entity_id": "settle_001",
+      "type": "payment",
+      "payment_id": "pay_sample_001",
+      "order_id": "ORD_sample_001",
+      "amount": 50000,
+      "fee": 1000,
+      "tax": 180,
+      "currency": "INR",
+      "settled": 48820,
+      "settlement_id": "set_001",
+      "settlement_utr": "UTR123456789",
+      "created_at": "2026-09-01T10:00:00Z",
+      "settled_at": "2026-09-02T10:00:00Z",
+      "method": "UPI",
+      "source": "sample_batch"
+    },
+    {
+      "entity_id": "settle_002",
+      "type": "payment",
+      "payment_id": "pay_sample_002",
+      "order_id": "ORD_sample_002",
+      "amount": 125000,
+      "fee": 2500,
+      "tax": 450,
+      "currency": "INR",
+      "settled": 122050,
+      "settlement_id": "set_002",
+      "settlement_utr": "UTR987654321",
+      "created_at": "2026-09-01T11:00:00Z",
+      "settled_at": "2026-09-02T11:00:00Z",
+      "method": "Card",
+      "card_network": "VISA",
+      "source": "sample_batch"
+    }
+  ],
+  "note": "This is a minimal sample. Run fetch_settlements.py with real API keys for production use."
+}
