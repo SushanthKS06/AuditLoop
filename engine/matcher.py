@@ -263,11 +263,9 @@ class DeterministicMatcher:
                         rule_fired.append('payment_id_ledger_match')
                         break
             
-            # If bank or ledger matched
-            if matched_bank_row is not None or matched_ledger_row is not None:
-                match_type = 'exact_3way' if (matched_bank_row is not None and matched_ledger_row is not None) else (
-                    'exact_utr' if matched_bank_row is not None else 'exact_order'
-                )
+            # Require bank leg for ANY match
+            if matched_bank_row is not None:
+                match_type = 'exact_3way' if matched_ledger_row is not None else 'exact_utr'
                 
                 match_record = {
                     'settlement': sett.to_dict(),
@@ -416,14 +414,12 @@ class DeterministicMatcher:
                     'rule_fired': best_rule
                 }
                 
-                if best_score >= self.confidence_threshold:
+                # Ledger matches without a bank leg cannot be fully matched
+                if best_score >= self.confidence_threshold and best_match[0] == 'bank':
                     match_record['final_status'] = 'matched'
                     matched_records.append(match_record)
                     decision = 'matched'
-                    if best_match[0] == 'bank':
-                        matched_bank_ids.add(best_match[1].name)
-                    else:
-                        matched_ledger_ids.add(best_match[1].name)
+                    matched_bank_ids.add(best_match[1].name)
                     matched_settlement_ids.add(sett.name)
                 else:
                     match_record['final_status'] = 'low_confidence'

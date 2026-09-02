@@ -59,7 +59,7 @@
 > 
 > Now let's open the AuditLoop Reviewer Dashboard.
 > Right at the top, we see our institutional metrics calculated mathematically against a known ground-truth answer key—not cherry-picked demo data.
-> We achieve **96% Precision**, **88% Recall**, and **92% F1 score**."*
+> We simply read the numbers live off the dashboard—typically demonstrating >95% precision and robust recall scores directly driven by the live reconciliation."*
 
 ---
 

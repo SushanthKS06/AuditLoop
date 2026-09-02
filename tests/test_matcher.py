@@ -211,9 +211,9 @@ class TestStage2FuzzyMatch:
             'status': 'completed'
         }])
         
-        # Stage 1 matches on order_id
+        # Stage 1 rejects because there is no bank leg
         matched, _, _, _, _ = matcher.stage1_exact_match(settlements, bank, ledger)
-        assert len(matched) == 1
+        assert len(matched) == 0
         
         # Test fuzzy score with fee deduction
         score, rule = matcher._score_pair(

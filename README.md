@@ -258,12 +258,14 @@ To guarantee at least one LLM-vs-deterministic disagreement is visible in every 
 
 ## Reproducibility
 
+Because `fetch_settlements.py` caches the live Razorpay API pull to a local CSV snapshot (`data/settlements_live.csv`), the entire pipeline is fully deterministic and reproducible as long as you use the same snapshot and seed.
+
 ```bash
-# Same seed = same results (proves determinism)
+# Same seed + same snapshot = same results (proves determinism)
 python run_pipeline.py --seed 42 --records 56
 python run_pipeline.py --seed 42 --records 56  # Identical output
 
-# Different seed = different but valid results (proves not hardcoded)
+# Different seed = different synthetic bank/ledger data but valid results
 python run_pipeline.py --seed 123 --records 56
 python run_pipeline.py --seed 456 --records 56
 ```
