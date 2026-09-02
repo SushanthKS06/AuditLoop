@@ -1,256 +1,260 @@
 """
-FastAPI service exposing AuditLoop reconciliation as an API.
+FastAPI service exposing AuditLoop reconciliation as a production-ready REST API.
 
-This is optional but adds a "production-ready" feel for judges.
-Single /reconcile endpoint triggers the full pipeline and returns metrics.
+Provides endpoints for programmatic reconciliation runs, metrics evaluation,
+and real-time inspection of the append-only audit trail.
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Optional, Dict, Any, List
 import os
 import sys
 import json
-import asyncio
+from datetime import datetime, timezone
 
-# Add parent directory to path for imports
+# Add parent directory to path for clean package imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data.generate_data import generate_all_datasets
-from engine.matcher import DeterministicMatcher as ReconciliationEngine
+from run_pipeline import ReconciliationPipeline
 from audit.store import AuditStore
+from audit.models import AuditEntry, AuditSummaryStats, HumanResolutionRequest, HumanResolutionResponse
 from metrics.evaluate import MetricsEvaluator
 
 app = FastAPI(
     title="AuditLoop Reconciliation API",
-    description="Production-ready API for multi-source financial reconciliation with deterministic-first matching and LLM-assisted exception handling.",
+    description="Production-grade REST API for multi-source financial reconciliation with deterministic-first matching, fee awareness, and LLM-assisted exception handling.",
     version="1.0.0"
 )
 
 
 class ReconcileRequest(BaseModel):
-    """Request model for reconciliation endpoint."""
-    records: int = 50
-    seed: int = 42
-    messiness: float = 0.25
-    force_disagreement: bool = False
-    skip_data_generation: bool = False
+    """Request model for triggering reconciliation."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "records": 50,
+                "seed": 42,
+                "messiness": 0.25,
+                "force_disagreement": True,
+                "use_llm": True
+            }
+        }
+    )
+    records: int = Field(50, ge=1, le=1000, description="Number of records in the reconciliation batch")
+    seed: int = Field(42, description="Random seed for deterministic reproducibility")
+    messiness: float = Field(0.25, ge=0.0, le=1.0, description="Injected anomaly/messiness ratio")
+    force_disagreement: bool = Field(False, description="Ensure at least one disagreement case exists for failure-recovery validation")
+    use_llm: bool = Field(True, description="Enable Claude LLM for Stage 3 exception explanation and resolution proposals")
+    settlements_path: str = Field("data/settlements_live.csv", description="Path to Razorpay settlements CSV")
+    bank_path: str = Field("data/bank_statement.csv", description="Path to bank statement CSV")
+    ledger_path: str = Field("data/internal_ledger.csv", description="Path to internal ledger CSV")
 
 
 class ReconcileResponse(BaseModel):
-    """Response model for reconciliation endpoint."""
+    """Response model for reconciliation execution."""
     status: str
-    metrics: Dict[str, Any]
-    summary: Dict[str, Any]
-    audit_log_count: int
+    timestamp: str
+    matches_count: int
     exceptions_count: int
     disagreements_count: int
+    audit_log_count: int
+    metrics: Dict[str, Any]
+    audit_summary: Dict[str, Any]
 
 
 class HealthResponse(BaseModel):
-    """Health check response."""
+    """Health check response model."""
     status: str
     version: str
+    timestamp: str
+    deterministic_engine: str = "active"
+    audit_store: str = "sqlite_wal"
 
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """
     Health check endpoint.
-    
-    Returns service status and version.
+    Returns service health, version, and component status.
     """
     return HealthResponse(
         status="healthy",
-        version="1.0.0"
+        version="1.0.0",
+        timestamp=datetime.now(timezone.utc).isoformat()
     )
 
 
 @app.post("/reconcile", response_model=ReconcileResponse)
-async def run_reconciliation(
-    request: ReconcileRequest,
-    background_tasks: BackgroundTasks
-):
+def run_reconciliation(request: ReconcileRequest):
     """
-    Run the full reconciliation pipeline.
+    Run the full end-to-end reconciliation pipeline.
     
-    This endpoint:
-    1. Generates synthetic bank/ledger data (optionally)
-    2. Runs deterministic matching (Stage 1 & 2)
-    3. Invokes LLM for exceptions (Stage 3)
-    4. Performs deterministic re-verification of LLM proposals
-    5. Evaluates metrics against ground truth
-    6. Returns comprehensive results
+    Executed in FastAPI worker threadpool to prevent CPU-bound event loop starvation.
     
-    **Why this matters:** Every match is verified deterministically, 
-    even if proposed by the LLM. This is the core safety guarantee.
+    Pipeline Steps:
+    1. Ingestion / Data generation with realistic messiness
+    2. Stage 1: Exact matching on normalized UTR / Order ID / Payment ID (O(N+M))
+    3. Stage 2: Fuzzy matching with MDR fee-deduction awareness
+    4. Stage 3: LLM exception explanation & proposal generation with CoT & PII masking
+    5. Deterministic re-verification of all LLM match proposals (fail-closed)
+    6. Cryptographically chained audit trail persistence (SHA-256)
+    7. Mathematical metrics computation against ground truth
     """
     try:
-        # Determine data directory
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        data_dir = os.path.join(base_dir, "data")
-        
-        # Step 1: Generate data if not skipping
-        if not request.skip_data_generation:
-            print(f"Generating {request.records} records with seed={request.seed}...")
-            generate_all_datasets(
-                num_records=request.records,
-                seed=request.seed,
-                messiness_factor=request.messiness,
-                link_to_settlements=False,  # Use sample batch for API calls
-                force_disagreement=request.force_disagreement
-            )
-        
-        # Step 2: Initialize components
-        engine = ReconciliationEngine(data_dir=data_dir)
-        audit_store = AuditStore(db_path=os.path.join(data_dir, "audit.db"))
-        
-        # Step 3: Clear previous audit log for fresh run
-        audit_store.clear()
-        
-        # Step 4: Load datasets
-        settlements, bank, ledger = engine._load_data()
-        
-        if settlements is None or bank is None or ledger is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to load datasets. Ensure data files exist."
-            )
-        
-        # Step 5: Run Stage 1 & 2 - Deterministic matching
-        print("Running deterministic matching (Stage 1 & 2)...")
-        matched_pairs, unmatched_settlements, unmatched_bank = engine.match_all(
-            settlements, bank, ledger
+        pipeline = ReconciliationPipeline(
+            use_llm=request.use_llm,
+            force_disagreement_demo=request.force_disagreement
         )
         
-        # Step 6: Run Stage 3 - LLM exception handling with verification
-        print("Processing exceptions through LLM (Stage 3)...")
-        all_decisions = await engine.process_exceptions_with_verification(
-            unmatched_settlements,
-            unmatched_bank,
-            audit_store
+        results = pipeline.run(
+            settlements_path=request.settlements_path,
+            bank_path=request.bank_path,
+            ledger_path=request.ledger_path,
+            generate_if_missing=True,
+            num_records=request.records,
+            seed=request.seed
         )
         
-        # Step 7: Combine all decisions
-        all_decisions.extend(matched_pairs)
+        if "error" in results:
+            raise HTTPException(status_code=400, detail=results["error"])
         
-        # Step 8: Evaluate metrics against ground truth
-        print("Evaluating metrics...")
-        ground_truth_path = os.path.join(data_dir, "ground_truth.json")
-        
-        if os.path.exists(ground_truth_path):
-            evaluator = MetricsEvaluator()
-            metrics_result = evaluator.evaluate_from_files(
-                decisions=all_decisions,
-                ground_truth_path=ground_truth_path
-            )
-            metrics = metrics_result.get("metrics", {})
-            summary = metrics_result.get("summary", {})
-        else:
-            # No ground truth - return basic stats only
-            metrics = {
-                "precision": None,
-                "recall": None,
-                "false_positive_rate": None,
-                "note": "No ground_truth.json found - metrics unavailable"
-            }
-            summary = {
-                "total_records": len(all_decisions),
-                "matched": len([d for d in all_decisions if d.get("final_status") == "matched"]),
-                "exceptions": len([d for d in all_decisions if "exception" in d.get("final_status", "")])
-            }
-        
-        # Step 9: Get audit log count
+        audit_store = AuditStore()
         audit_count = audit_store.count()
-        
-        # Step 10: Count exceptions and disagreements
-        exceptions_count = len([
-            d for d in all_decisions 
-            if "exception" in d.get("final_status", "")
-        ])
-        
-        disagreements_count = len([
-            d for d in all_decisions
-            if d.get("final_status") == "llm_deterministic_disagreement"
-        ])
         
         return ReconcileResponse(
             status="completed",
-            metrics=metrics,
-            summary=summary,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            matches_count=results.get("matches_count", 0),
+            exceptions_count=results.get("exceptions_count", 0),
+            disagreements_count=results.get("metrics", {}).get("disagreement_count", 0),
             audit_log_count=audit_count,
-            exceptions_count=exceptions_count,
-            disagreements_count=disagreements_count
+            metrics=results.get("metrics", {}),
+            audit_summary=results.get("audit_summary", {})
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        # Log error and return detailed message
-        print(f"Pipeline error: {str(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail=f"Reconciliation failed: {str(e)}"
+            detail=f"Reconciliation execution failed: {str(e)}"
         )
+
+
+@app.get("/audit/verify", response_model=Dict[str, Any])
+def verify_audit_integrity():
+    """
+    Cryptographically verify the entire append-only audit trail.
+    
+    Recalculates SHA-256 block hashes from genesis to head and proves
+    that zero records have been altered, deleted, or injected.
+    """
+    store = AuditStore()
+    return store.verify_integrity()
 
 
 @app.get("/metrics", response_model=Dict[str, Any])
 async def get_latest_metrics():
     """
     Get latest reconciliation metrics from the most recent run.
-    
-    Reads metrics_report.json if it exists.
+    Reads metrics_report.json and returns precision, recall, F1, and error rates.
     """
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    metrics_path = os.path.join(base_dir, "metrics_report.json")
     
-    if not os.path.exists(metrics_path):
-        raise HTTPException(
-            status_code=404,
-            detail="No metrics report found. Run /reconcile first."
-        )
-    
-    with open(metrics_path, 'r') as f:
-        return json.load(f)
-
-
-@app.get("/audit/recent", response_model=list)
-async def get_recent_audit_entries(limit: int = 20):
-    """
-    Get recent audit log entries.
-    
-    Returns the most recent N audit entries for inspection.
-    """
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    db_path = os.path.join(base_dir, "data", "audit.db")
-    
-    if not os.path.exists(db_path):
-        raise HTTPException(
-            status_code=404,
-            detail="No audit database found. Run /reconcile first."
-        )
-    
-    store = AuditStore(db_path=db_path)
-    entries = store.get_all_entries()[-limit:]  # Last N entries
-    
-    # Convert to dict format for JSON response
-    return [
-        {
-            "record_ids": e.record_ids,
-            "sources": e.sources,
-            "stage_reached": e.stage_reached,
-            "rule_or_tool_fired": e.rule_or_tool_fired,
-            "confidence": e.confidence,
-            "decision": e.decision,
-            "llm_reasoning": e.llm_reasoning,
-            "timestamp": e.timestamp.isoformat() if e.timestamp else None,
-            "final_status": e.final_status
-        }
-        for e in entries
+    paths_to_check = [
+        os.path.join(base_dir, "metrics", "metrics_report.json"),
+        os.path.join(base_dir, "metrics_report.json")
     ]
+    
+    for p in paths_to_check:
+        if os.path.exists(p):
+            with open(p, 'r') as f:
+                return json.load(f)
+    
+    raise HTTPException(
+        status_code=404,
+        detail="No metrics report found. Run /reconcile or run_pipeline.py first."
+    )
+
+
+@app.get("/audit/recent", response_model=List[Dict[str, Any]])
+async def get_recent_audit_entries(
+    limit: int = Query(20, ge=1, le=500, description="Maximum entries to return"),
+    status: Optional[str] = Query(None, description="Filter by final status (e.g. matched, llm_deterministic_disagreement)")
+):
+    """
+    Get recent entries from the immutable SQLite audit log.
+    Supports optional status filtering and pagination limit.
+    """
+    store = AuditStore()
+    
+    if status:
+        entries = store.get_by_status(status)
+        return entries[-limit:] if entries else []
+    
+    return store.get_recent(limit=limit)
+
+
+@app.get("/audit/disagreements", response_model=List[Dict[str, Any]])
+async def get_disagreements():
+    """
+    Get all cases where the LLM proposal conflicted with deterministic re-verification.
+    Proves the fail-closed Failure Recovery guarantee.
+    """
+    store = AuditStore()
+    return store.get_disagreements()
+
+
+@app.get("/audit/exceptions", response_model=List[Dict[str, Any]])
+async def get_unresolved_exceptions():
+    """
+    Get all unresolved exceptions requiring human reviewer inspection.
+    """
+    store = AuditStore()
+    return store.get_exceptions()
+
+
+@app.get("/audit/summary", response_model=Dict[str, Any])
+async def get_audit_summary():
+    """
+    Get high-level throughput and confidence summary statistics from the audit log.
+    """
+    store = AuditStore()
+    return store.get_summary_stats()
+
+
+@app.post("/audit/resolve", response_model=HumanResolutionResponse)
+def resolve_audit_exception(request: HumanResolutionRequest):
+    """
+    Human-in-the-Loop Maker-Checker endpoint.
+    Allows an authorized financial controller to manually resolve a flagged exception or disagreement.
+    The decision is immutably appended to the SHA-256 chained audit trail with cryptographic proof.
+    """
+    store = AuditStore()
+    result = store.resolve_exception(
+        record_ids=request.record_ids,
+        reviewer_id=request.reviewer_id,
+        decision=request.decision,
+        notes=request.notes
+    )
+    return HumanResolutionResponse(**result)
+
+
+@app.get("/audit/history", response_model=List[Dict[str, Any]])
+async def get_record_audit_history(
+    record_ids: str = Query(..., description="Target record_ids pair to inspect full history for")
+):
+    """
+    Inspect the complete chronological decision history of a specific record pair across all stages.
+    """
+    store = AuditStore()
+    return store.get_record_history(record_ids)
 
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

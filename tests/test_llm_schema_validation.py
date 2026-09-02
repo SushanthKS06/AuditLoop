@@ -17,14 +17,16 @@ class TestExplainExceptionSchema:
     """Test the explain_exception response schema."""
     
     def test_valid_response(self):
-        """Test valid explanation response."""
+        """Test valid explanation response with Chain-of-Thought."""
         data = {
+            "thought_process": "Comparing timestamps: Settlement lag is within normal T+2 window for UPI.",
             "root_cause": "timing_lag",
             "explanation": "The settlement date is 2 days after the bank transaction, which is within normal T+2 settlement windows.",
             "confidence": 0.87
         }
         
         response = ExplainExceptionResponse(**data)
+        assert response.thought_process.startswith("Comparing")
         assert response.root_cause == "timing_lag"
         assert response.confidence == 0.87
     
@@ -38,6 +40,7 @@ class TestExplainExceptionSchema:
         
         for cause in valid_causes:
             data = {
+                "thought_process": "Testing root cause deduction logic for valid causes.",
                 "root_cause": cause,
                 "explanation": "Test explanation here",
                 "confidence": 0.5
@@ -48,6 +51,7 @@ class TestExplainExceptionSchema:
     def test_invalid_root_cause(self):
         """Test that invalid root causes are rejected."""
         data = {
+            "thought_process": "Testing invalid root cause deduction logic.",
             "root_cause": "invalid_cause",  # Not in enum
             "explanation": "Test explanation",
             "confidence": 0.5
@@ -60,29 +64,33 @@ class TestExplainExceptionSchema:
         """Test confidence value bounds."""
         # Valid bounds
         assert ExplainExceptionResponse(
+            thought_process="Valid deduction reasoning process.",
             root_cause="rounding",
-            explanation="Test",
+            explanation="Valid test explanation string",
             confidence=0.0
         ).confidence == 0.0
         
         assert ExplainExceptionResponse(
+            thought_process="Valid deduction reasoning process.",
             root_cause="rounding",
-            explanation="Test",
+            explanation="Valid test explanation string",
             confidence=1.0
         ).confidence == 1.0
         
         # Out of bounds should fail
         with pytest.raises(ValidationError):
             ExplainExceptionResponse(
+                thought_process="Valid deduction reasoning process.",
                 root_cause="rounding",
-                explanation="Test",
+                explanation="Valid test explanation string",
                 confidence=-0.1
             )
         
         with pytest.raises(ValidationError):
             ExplainExceptionResponse(
+                thought_process="Valid deduction reasoning process.",
                 root_cause="rounding",
-                explanation="Test",
+                explanation="Valid test explanation string",
                 confidence=1.1
             )
     
@@ -91,6 +99,7 @@ class TestExplainExceptionSchema:
         # Too short (< 10 chars)
         with pytest.raises(ValidationError):
             ExplainExceptionResponse(
+                thought_process="Valid deduction reasoning process.",
                 root_cause="rounding",
                 explanation="Short",
                 confidence=0.5
@@ -98,6 +107,7 @@ class TestExplainExceptionSchema:
         
         # Valid length
         response = ExplainExceptionResponse(
+            thought_process="Valid deduction reasoning process.",
             root_cause="rounding",
             explanation="This is a valid explanation.",
             confidence=0.5
@@ -109,8 +119,9 @@ class TestProposeResolutionSchema:
     """Test the propose_resolution response schema."""
     
     def test_valid_match_action(self):
-        """Test valid match proposal."""
+        """Test valid match proposal with thought_process."""
         data = {
+            "thought_process": "UTR correlation matches exactly and fee calculation matches expected MDR rate.",
             "action": "match",
             "confidence": 0.91,
             "reasoning": "UTR matches exactly and amount difference is within fee tolerance."
@@ -126,6 +137,7 @@ class TestProposeResolutionSchema:
         
         for action in valid_actions:
             data = {
+                "thought_process": f"Deduction analysis for action {action}.",
                 "action": action,
                 "confidence": 0.7,
                 "reasoning": "Test reasoning for " + action
@@ -136,6 +148,7 @@ class TestProposeResolutionSchema:
     def test_invalid_action(self):
         """Test that invalid actions are rejected."""
         data = {
+            "thought_process": "Testing invalid action proposal.",
             "action": "auto_approve",  # Not in enum
             "confidence": 0.5,
             "reasoning": "Test"
@@ -147,6 +160,7 @@ class TestProposeResolutionSchema:
     def test_reasoning_required(self):
         """Test that reasoning is required."""
         data = {
+            "thought_process": "Testing missing reasoning.",
             "action": "match",
             "confidence": 0.8
             # Missing reasoning

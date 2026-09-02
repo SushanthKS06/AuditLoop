@@ -94,19 +94,14 @@ class TestEndToEndMetrics:
         assert metrics['precision'] >= 0.8
         assert metrics['recall'] >= 0.8
     
-    def test_ground_truth_covers_all_messiness_types(self):
+    def test_ground_truth_covers_all_messiness_types(self, tmp_path):
         """Test that ground truth includes all injected messiness types."""
         gen = SyntheticDataGenerator(seed=42, messiness_ratio=0.35)  # Higher messiness
-        gen.generate(num_records=100, settlements_df=None, output_dir="/tmp/gt_test")
+        test_dir = tmp_path / "gt_test"
+        gen.generate(num_records=100, settlements_df=None, output_dir=str(test_dir))
         
         messiness_types = set(gt['messiness_type'] for gt in gen.ground_truth)
         
         # Should have at least exact matches and some messiness
         assert 'exact_match' in messiness_types
         assert len(messiness_types) > 1  # At least one messy type
-        
-        # Clean up
-        os.remove("/tmp/gt_test/ground_truth.json")
-        os.remove("/tmp/gt_test/bank_statement.csv")
-        os.remove("/tmp/gt_test/internal_ledger.csv")
-        os.rmdir("/tmp/gt_test")

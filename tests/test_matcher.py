@@ -155,7 +155,7 @@ class TestStage2FuzzyMatch:
         
         ledger = pd.DataFrame()
         
-        matched, low_conf, _, _, _ = matcher.stage2_fuzzy_match(
+        matched, low_conf, _, _, _, _ = matcher.stage2_fuzzy_match(
             settlements, bank, ledger
         )
         
@@ -183,7 +183,7 @@ class TestStage2FuzzyMatch:
         
         ledger = pd.DataFrame()
         
-        matched, low_conf, _, _, _ = matcher.stage2_fuzzy_match(
+        matched, low_conf, _, _, _, _ = matcher.stage2_fuzzy_match(
             settlements, bank, ledger
         )
         
@@ -191,21 +191,69 @@ class TestStage2FuzzyMatch:
         assert len(matched) == 0
 
 
+    def test_fee_adjusted_ledger_match(self, matcher):
+        """Test that net settlement matches gross ledger entry when fee is accounted for."""
+        settlements = pd.DataFrame([{
+            'entity_id': 'sett_001',
+            'settlement_utr': '',
+            'order_id': 'ORD_FEE_TEST',
+            'amount': 1000.0,
+            'settled_amount': 976.40,  # 2% fee + 18% GST deduction
+            'fee': 23.60,
+            'settled_at': '2026-09-01T10:00:00Z'
+        }])
+        
+        bank = pd.DataFrame()
+        ledger = pd.DataFrame([{
+            'order_id': 'ORD_FEE_TEST',
+            'expected_amount': 1000.0,
+            'order_date': '2026-09-01',
+            'status': 'completed'
+        }])
+        
+        # Stage 1 matches on order_id
+        matched, _, _, _, _ = matcher.stage1_exact_match(settlements, bank, ledger)
+        assert len(matched) == 1
+        
+        # Test fuzzy score with fee deduction
+        score, rule = matcher._score_pair(
+            amount1=976.40,
+            date1=datetime(2026, 9, 1),
+            amount2=1000.0,
+            date2=datetime(2026, 9, 1),
+            text1="ORD_FEE_TEST",
+            text2="ORD_FEE_TEST",
+            fee1=23.60,
+            is_ledger=True
+        )
+        assert score >= 0.85
+        assert rule == "fee_adjusted_settlement_match"
+
+
 class TestNormalization:
     """Test field normalization functions."""
     
     def test_normalize_amount_with_commas(self, matcher):
-        """Test amount normalization with commas."""
+        """Test amount normalization with commas and accounting formats."""
         assert matcher._normalize_amount("1,000.50") == 1000.50
         assert matcher._normalize_amount("₹1,500") == 1500.0
+        assert matcher._normalize_amount("INR 25,000.00") == 25000.0
+        assert matcher._normalize_amount("(1,250.00)") == -1250.00
+        assert matcher._normalize_amount("-₹500.00") == -500.00
+        assert matcher._normalize_amount("- 2,000") == -2000.00
     
     def test_normalize_date_formats(self, matcher):
         """Test various date format parsing."""
         assert matcher._normalize_date("2026-09-01") is not None
         assert matcher._normalize_date("01/09/2026") is not None
         assert matcher._normalize_date("2026-09-01T10:00:00Z") is not None
+        assert matcher._normalize_date("2026-09-01T10:00:00+00:00") is not None
     
     def test_normalize_text(self, matcher):
         """Test text normalization."""
         assert matcher._normalize_text("  HELLO  ") == "hello"
         assert matcher._normalize_text(None) == ""
+        assert matcher._normalize_text("null") == ""
+        assert matcher._normalize_text("nan") == ""
+        assert matcher._normalize_text("None") == ""
+

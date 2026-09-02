@@ -50,7 +50,8 @@ class SyntheticDataGenerator:
         self,
         num_records: int = 80,
         settlements_df: Optional[pd.DataFrame] = None,
-        output_dir: str = "data"
+        output_dir: str = "data",
+        force_disagreement: bool = False
     ) -> tuple:
         """
         Generate synthetic bank statement and internal ledger data.
@@ -59,6 +60,7 @@ class SyntheticDataGenerator:
             num_records: Target number of records to generate
             settlements_df: Optional DataFrame from Razorpay API (for linking)
             output_dir: Directory to write CSV files
+            force_disagreement: If True, injects an organic disagreement candidate edge case
             
         Returns:
             Tuple of (bank_df, ledger_df, ground_truth_list)
@@ -77,11 +79,13 @@ class SyntheticDataGenerator:
         print(f"  - {num_real} linked to real Razorpay settlements")
         print(f"  - {num_synthetic} fully synthetic")
         
+        settlement_records = []
         bank_records = []
         ledger_records = []
         
-        # Generate records linked to real settlements (if available)
+        # Include existing real settlements
         for i, settlement in enumerate(real_settlements[:num_real]):
+            settlement_records.append(settlement)
             bank_rec, ledger_rec, gt_entry = self._generate_linked_record(
                 settlement, index=i
             )
@@ -89,23 +93,68 @@ class SyntheticDataGenerator:
             ledger_records.append(ledger_rec)
             self.ground_truth.append(gt_entry)
         
-        # Generate fully synthetic records
+        # Generate fully synthetic 3-way records
         for i in range(num_synthetic):
-            bank_rec, ledger_rec, gt_entry = self._generate_fully_synthetic_record(
-                index=num_real + i
+            idx = num_real + i
+            order_id = f"ORD_SYNTH_{idx:04d}"
+            payment_id = f"PAY_SYNTH_{idx:04d}"
+            utr = f"UTR{random.randint(100000, 999999)}"
+            amount = round(random.uniform(100, 50000), 2)
+            fee = round(amount * random.uniform(0.015, 0.025), 2)
+            tax = round(fee * 0.18, 2)
+            base_date = datetime.now() - timedelta(days=random.randint(0, 30))
+            settled_at = base_date.isoformat()
+            
+            # Create synthetic settlement row
+            sett_rec = {
+                'entity_id': f"sett_{idx:04d}",
+                'type': 'payment',
+                'payment_id': payment_id,
+                'order_id': order_id,
+                'amount': amount,
+                'fee': fee,
+                'tax': tax,
+                'currency': 'INR',
+                'settled_amount': round(amount - fee - tax, 2),
+                'settlement_id': f"set_{idx:04d}",
+                'settlement_utr': utr,
+                'created_at': base_date.isoformat(),
+                'settled_at': (base_date + timedelta(days=1)).isoformat(),
+                'method': random.choice(['UPI', 'Card', 'Netbanking']),
+                'card_network': random.choice(['VISA', 'Mastercard', 'RuPay']),
+                'source': 'synthetic'
+            }
+            settlement_records.append(sett_rec)
+            
+            messiness_type = self._decide_messiness()
+            if force_disagreement and i == num_synthetic // 2:
+                messiness_type = "date_lag"
+            
+            bank_rec, ledger_rec, gt_entry = self._create_matched_pair(
+                order_id=order_id,
+                payment_id=payment_id,
+                utr=utr,
+                amount=amount,
+                fee=fee + tax,
+                settled_at=settled_at,
+                messiness_type=messiness_type,
+                source='synthetic'
             )
             bank_records.append(bank_rec)
             ledger_records.append(ledger_rec)
             self.ground_truth.append(gt_entry)
         
+        settlements_out_df = pd.DataFrame(settlement_records)
         bank_df = pd.DataFrame(bank_records)
         ledger_df = pd.DataFrame(ledger_records)
         
         # Save to CSV
+        settlements_path = os.path.join(output_dir, "settlements_live.csv")
         bank_path = os.path.join(output_dir, "bank_statement.csv")
         ledger_path = os.path.join(output_dir, "internal_ledger.csv")
         gt_path = os.path.join(output_dir, "ground_truth.json")
         
+        settlements_out_df.to_csv(settlements_path, index=False)
         bank_df.to_csv(bank_path, index=False)
         ledger_df.to_csv(ledger_path, index=False)
         
@@ -113,6 +162,7 @@ class SyntheticDataGenerator:
             json.dump(self.ground_truth, f, indent=2, default=str)
         
         print(f"\nGenerated files:")
+        print(f"  - {settlements_path}")
         print(f"  - {bank_path}")
         print(f"  - {ledger_path}")
         print(f"  - {gt_path}")
@@ -221,26 +271,43 @@ class SyntheticDataGenerator:
         gt_root_cause = "exact_match"
         gt_notes = "Clean match"
         
+        bank_utr = utr
+        bank_ref = payment_id
+        
         if messiness_type == "date_lag":
-            bank_date = base_date + timedelta(days=random.choice([-1, 1]))
-            gt_notes = "Settlement lag of 1 day"
+            bank_date = base_date + timedelta(days=random.choice([-2, 2]))
+            bank_utr = ""  # Strip exact UTR to exercise fuzzy/exception logic
+            bank_ref = ""
+            gt_root_cause = "timing_lag"
+            gt_notes = "Settlement lag of 2 days"
             
         elif messiness_type == "fee_deduction":
-            # Bank shows net, ledger shows gross - should still match
+            # Bank shows net, ledger shows gross
+            bank_utr = ""
+            bank_ref = ""
+            gt_root_cause = "rounding"
             gt_notes = "Fee deduction mismatch - bank shows net, ledger shows gross"
             
         elif messiness_type == "date_format":
-            # Simulate DD/MM vs MM/DD confusion
-            bank_date = base_date + timedelta(days=random.randint(1, 28))
+            # Simulate date ambiguity
+            bank_date = base_date + timedelta(days=random.randint(3, 10))
+            bank_utr = ""
+            bank_ref = ""
+            gt_root_cause = "timing_lag"
             gt_notes = "Date format ambiguity"
             
         elif messiness_type == "rounding_diff":
-            bank_amount = bank_amount + random.uniform(-0.5, 0.5)
+            bank_amount = bank_amount + random.uniform(-0.45, 0.45)
+            bank_utr = ""
+            bank_ref = ""
+            gt_root_cause = "rounding"
             gt_notes = "Minor rounding difference"
             
         elif messiness_type == "duplicate_suspect":
             # Create a record that looks similar but shouldn't match
             order_id = f"ORD_DUP_{random.randint(1000, 9999)}"
+            bank_utr = f"UTR_DUP_{random.randint(100000, 999999)}"
+            bank_ref = f"PAY_DUP_{random.randint(1000, 9999)}"
             gt_should_match = False
             gt_root_cause = "duplicate_suspected"
             gt_notes = "Same amount, different order - should NOT match"
@@ -249,6 +316,9 @@ class SyntheticDataGenerator:
             # Bank record with no ledger counterpart
             ledger_amount = None
             ledger_ref = None
+            ledger_order_id = f"ORD_ORPHAN_{random.randint(1000, 9999)}"
+            order_id = ledger_order_id
+            bank_utr = f"UTR_ORPHAN_{random.randint(100000, 999999)}"
             gt_should_match = False
             gt_root_cause = "no_counterpart"
             gt_notes = "Orphaned bank record"
@@ -257,38 +327,42 @@ class SyntheticDataGenerator:
             # Ledger record with no bank counterpart
             bank_amount = None
             bank_narration = None
+            bank_utr = ""
+            bank_ref = ""
             gt_should_match = False
             gt_root_cause = "no_counterpart"
             gt_notes = "Orphaned ledger record"
             
         elif messiness_type == "partial_refund":
-            # Mark for special handling - one ledger maps to multiple settlements
             gt_root_cause = "partial_refund"
             gt_notes = "Partial refund - may need multi-record matching"
             
         elif messiness_type == "formatting_noise":
             # Add formatting noise to narration
+            bank_utr = ""
+            bank_ref = ""
             bank_narration = f"Rs. {amount:,.2f} / {utr} / {order_id}"
+            gt_root_cause = "currency_formatting"
             gt_notes = "Formatting noise in narration"
         
         # Build bank record
         bank_rec = {
             'txn_id': f"TXN_{random.randint(100000, 999999)}",
-            'amount': round(bank_amount, 2) if bank_amount else None,
+            'amount': round(bank_amount, 2) if bank_amount is not None else None,
             'value_date': bank_date.strftime('%Y-%m-%d'),
             'narration': bank_narration if bank_narration else '',
-            'utr': utr,
-            'reference': payment_id,
+            'utr': bank_utr,
+            'reference': bank_ref,
             'source': source
         }
         
         # Build ledger record
         ledger_rec = {
             'order_id': order_id,
-            'expected_amount': round(ledger_amount, 2) if ledger_amount else None,
+            'expected_amount': round(ledger_amount, 2) if ledger_amount is not None else None,
             'order_date': ledger_date.strftime('%Y-%m-%d'),
             'customer_ref': f"CUST_{random.randint(1000, 9999)}",
-            'status': 'completed' if ledger_amount else 'pending',
+            'status': 'completed' if ledger_amount is not None else 'pending',
             'payment_id': payment_id,
             'source': source
         }

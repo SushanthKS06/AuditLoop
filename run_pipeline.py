@@ -250,22 +250,28 @@ class ReconciliationPipeline:
                     print("  API returned no settlements - will use synthetic data")
             except ValueError as e:
                 print(f"  API unavailable: {e}")
-                print("  Using sample batch instead")
-                # Use sample batch
-                sample_path = "data/sample_batch/settlements_sample.json"
-                if os.path.exists(sample_path):
-                    with open(sample_path, 'r') as f:
-                        sample = json.load(f)
-                    settlements_df = pd.DataFrame(sample.get('settlements_sample', []))
+                print("  Generating linked synthetic dataset")
         
-        # Generate synthetic data if needed
-        if generate and (not os.path.exists(bank_path) or not os.path.exists(ledger_path)):
+        # If files are missing or row count does not match requested batch size, generate fresh synchronized datasets
+        needs_generation = (
+            generate and (
+                settlements_df is None
+                or not os.path.exists(bank_path)
+                or not os.path.exists(ledger_path)
+                or len(settlements_df) != num_records
+            )
+        )
+        
+        if needs_generation:
             generator = SyntheticDataGenerator(seed=seed, messiness_ratio=0.25)
             bank_df, ledger_df, _ = generator.generate(
                 num_records=num_records,
-                settlements_df=settlements_df,
-                output_dir="data"
+                settlements_df=settlements_df if settlements_df is not None and len(settlements_df) == num_records else None,
+                output_dir="data",
+                force_disagreement=self.force_disagreement_demo
             )
+            if os.path.exists(settlements_path):
+                settlements_df = pd.read_csv(settlements_path)
         else:
             bank_df = pd.read_csv(bank_path) if os.path.exists(bank_path) else pd.DataFrame()
             ledger_df = pd.read_csv(ledger_path) if os.path.exists(ledger_path) else pd.DataFrame()

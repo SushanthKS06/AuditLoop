@@ -19,33 +19,41 @@ used) since no equivalent sandbox exists for those.
 ```
 auditloop/
 ├── api/
-│   └── app.py                    # FastAPI REST API endpoints
+│   └── app.py                    # FastAPI REST API (with /audit/verify & sync threadpool execution)
 ├── data/
 │   ├── fetch_settlements.py     # Real Razorpay test-mode API pull
 │   ├── generate_data.py         # Synthetic bank + ledger data, linked to live pull
 │   ├── ground_truth.json        # Answer key for measuring precision/recall
 │   └── sample_batch/            # Committed example batch (runs with zero API keys)
 ├── engine/
-│   ├── matcher.py               # Deterministic exact + fuzzy matching (Stage 1 & 2)
+│   ├── matcher.py               # Vectorized exact + fuzzy matching (Stage 1 & 2 O(N+M))
 │   └── exceptions.py            # Stage 3 — dispatch unresolved records to the LLM
 ├── llm/
-│   ├── client.py                 # Claude API wrapper
-│   ├── schemas.py                 # Pydantic response models (strict validation)
-│   └── prompts.py                 # Scoped system + tool prompts
+│   ├── client.py                 # Groq API wrapper with function calling & retry backoff
+│   ├── schemas.py                 # Pydantic response models (Chain-of-Thought & strict validation)
+│   ├── prompts.py                 # Few-shot scoped prompts with CoT directions
+│   └── privacy.py                 # PII redaction layer (scrubs emails, phones, customer names)
 ├── audit/
-│   ├── store.py                   # SQLite audit log (append-only)
+│   ├── store.py                   # Cryptographically chained audit log (SHA-256 block hashing)
 │   └── models.py
 ├── metrics/
 │   └── evaluate.py                # Precision / recall / match-rate vs ground truth
 ├── dashboard/
-│   └── app.py                     # Streamlit reviewer dashboard
+│   └── app.py                     # Streamlit reviewer dashboard with audit chain inspector
 ├── tests/
 │   ├── test_matcher.py
 │   ├── test_llm_schema_validation.py
-│   └── test_end_to_end_metrics.py
+│   ├── test_end_to_end_metrics.py
+│   ├── test_audit_integrity.py
+│   ├── test_pii_sanitizer.py
+│   ├── test_adversarial_security.py   # Prompt injection & extreme numeric fuzzing
+│   ├── test_human_in_the_loop.py      # Maker-Checker manual resolution & hash chain
+│   ├── test_performance_scaling.py
+│   └── test_api.py
 ├── docs/
 │   ├── architecture.png
-│   └── DESIGN_DECISIONS.md        # Why deterministic-first, thresholds, tradeoffs
+│   ├── SCRIPT.md                      # 5-minute winning presentation & live demo script
+│   └── DESIGN_DECISIONS.md            # Why deterministic-first, thresholds, tradeoffs
 ├── README.md
 ├── requirements.txt
 ├── Dockerfile
@@ -55,25 +63,43 @@ auditloop/
 
 ## Tech Stack
 
-Python · FastAPI · pandas · RapidFuzz · Anthropic Claude (tool calling +
-Pydantic schemas) · Razorpay API · SQLite · Streamlit · pytest · Docker
+Python · FastAPI · pandas · RapidFuzz · Groq API (LLaMA 3.3 70B function calling +
+Pydantic schemas) · Razorpay API · SQLite (SHA-256 Chained) · Streamlit · pytest · Docker
 
-## API Endpoints (New - Production Ready)
+## API Endpoints (Production Ready)
 
-AuditLoop now exposes a REST API for programmatic access:
+AuditLoop exposes a production REST API for programmatic access and institutional compliance:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/health` | GET | Health check with version info |
-| `/reconcile` | POST | Run full reconciliation pipeline |
-| `/metrics` | GET | Get latest metrics report |
+| `/health` | GET | Health check with component status |
+| `/reconcile` | POST | Run full reconciliation pipeline (threadpool executed) |
+| `/metrics` | GET | Get latest metrics report against ground truth |
+| `/audit/verify` | GET | Cryptographically verify SHA-256 audit log integrity |
+| `/audit/resolve` | POST | Maker-Checker: Sign & append human controller resolution |
+| `/audit/history` | GET | Inspect complete chronological lifecycle of a record pair |
 | `/audit/recent` | GET | Inspect recent audit log entries |
+| `/audit/disagreements` | GET | View all LLM vs deterministic conflict records |
+| `/audit/summary` | GET | Get throughput and cryptographic health stats |
 
 ### Example API Usage
 
 ```bash
 # Health check
 curl http://localhost:8000/health
+
+# Cryptographically verify the audit chain
+curl http://localhost:8000/audit/verify
+
+# Maker-Checker: Human Controller Manual Resolution
+curl -X POST http://localhost:8000/audit/resolve \
+  -H "Content-Type: application/json" \
+  -d '{
+    "record_ids": "sett_001-TXN_001",
+    "decision": "human_approved_match",
+    "reviewer_id": "CONTROLLER_001",
+    "notes": "Verified gateway MDR fee discrepancy with signed merchant invoice."
+  }'
 
 # Run reconciliation with custom parameters
 curl -X POST http://localhost:8000/reconcile \
@@ -159,7 +185,8 @@ python run_pipeline.py --force-disagreement
 |---------------------|-------------|----------|
 | `RAZORPAY_KEY_ID` | Razorpay test-mode API key ID | No (falls back to sample batch) |
 | `RAZORPAY_KEY_SECRET` | Razorpay test-mode API secret | No (falls back to sample batch) |
-| `ANTHROPIC_API_KEY` | Anthropic Claude API key | No (LLM disabled if missing) |
+| `GROQ_API_KEY` | Groq API key for LLaMA 3.3 70B exception reasoning | No (LLM disabled if missing) |
+| `GROQ_MODEL` | Groq model identifier (default: `llama-3.3-70b-versatile`) | No |
 
 ## Running Tests
 

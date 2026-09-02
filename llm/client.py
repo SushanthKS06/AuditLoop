@@ -1,20 +1,21 @@
 """
-Claude API Client with Tool Calling
+Groq API Client with Function/Tool Calling
 
-Wraps the Anthropic SDK with strict Pydantic schema validation.
+Wraps the Groq SDK with strict Pydantic schema validation.
 Fail closed on any parse error or timeout.
 """
 
 import os
+import json
+import time
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 
 try:
-    from anthropic import Anthropic
-    AnthropicMessage = Anthropic.types.Message
+    import groq
+    from groq import Groq
 except ImportError:
-    Anthropic = None
-    AnthropicMessage = None
+    Groq = None
 
 from .schemas import (
     ExplainExceptionResponse,
@@ -31,33 +32,35 @@ from .prompts import (
 load_dotenv()
 
 
-class ClaudeClient:
+class GroqClient:
     """
-    Claude API client for exception explanation and resolution proposals.
+    Groq API client for exception explanation and resolution proposals.
     
-    Uses tool/function calling with strict JSON schema validation.
-    Any response that fails Pydantic validation is rejected.
+    Uses function/tool calling with strict JSON schema and Pydantic validation.
+    Any response that fails Pydantic validation is rejected (fail-closed).
     """
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "claude-sonnet-4-20250514"):
+    DEFAULT_MODEL = "llama-3.3-70b-versatile"
+    
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         """
         Args:
-            api_key: Anthropic API key (defaults to ANTHROPIC_API_KEY env var)
-            model: Claude model to use
+            api_key: Groq API key (defaults to GROQ_API_KEY env var)
+            model: Model to use (defaults to GROQ_MODEL env var or llama-3.3-70b-versatile)
         """
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        self.model = model
+        self.api_key = api_key or os.getenv("GROQ_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+        self.model = model or os.getenv("GROQ_MODEL") or self.DEFAULT_MODEL
         self.client = None
         
-        if Anthropic is None:
-            raise ImportError("anthropic package not installed. Run: pip install anthropic")
+        if Groq is None:
+            raise ImportError("groq package not installed. Run: pip install groq")
         
         if not self.api_key:
             raise ValueError(
-                "Anthropic API key not found. Set ANTHROPIC_API_KEY in .env or environment."
+                "Groq API key not found. Set GROQ_API_KEY in .env or environment variables."
             )
         
-        self.client = Anthropic(api_key=self.api_key)
+        self.client = Groq(api_key=self.api_key)
     
     def explain_exception(
         self,
@@ -65,7 +68,7 @@ class ClaudeClient:
         record_b: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """
-        Ask Claude to explain why an exception occurred.
+        Ask Groq to explain why an exception occurred using step-by-step reasoning.
         
         Args:
             record_a: Settlement record
@@ -80,36 +83,57 @@ class ClaudeClient:
         try:
             user_prompt = build_explain_prompt(record_a, record_b)
             
-            # Use structured output via Pydantic
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=300,
-                system=EXPLAIN_EXCEPTION_SYSTEM,
-                messages=[{"role": "user", "content": user_prompt}],
-                tools=[{
+            tool_schema = {
+                "type": "function",
+                "function": {
                     "name": "explain_exception",
-                    "description": "Explain the root cause of a reconciliation exception",
-                    "input_schema": {
+                    "description": "Perform step-by-step reasoning and explain the root cause of a reconciliation exception",
+                    "parameters": {
                         "type": "object",
                         "properties": {
+                            "thought_process": {
+                                "type": "string",
+                                "description": "Step-by-step deduction comparing amounts, dates, fees, and references"
+                            },
                             "root_cause": {
                                 "type": "string",
-                                "enum": ["rounding", "timing_lag", "duplicate_suspected", 
-                                        "partial_refund", "no_counterpart", 
-                                        "currency_formatting", "unclassified"]
+                                "enum": [
+                                    "rounding", "timing_lag", "duplicate_suspected",
+                                    "partial_refund", "no_counterpart",
+                                    "currency_formatting", "unclassified"
+                                ]
                             },
-                            "explanation": {"type": "string"},
-                            "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+                            "explanation": {
+                                "type": "string",
+                                "description": "Human-readable explanation of the root cause"
+                            },
+                            "confidence": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "Confidence score between 0 and 1"
+                            }
                         },
-                        "required": ["root_cause", "explanation", "confidence"]
+                        "required": ["thought_process", "root_cause", "explanation", "confidence"]
                     }
-                }],
-                tool_choice={"type": "tool", "name": "explain_exception"}
+                }
+            }
+            
+            response = self._execute_with_retry(
+                lambda: self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": EXPLAIN_EXCEPTION_SYSTEM},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    tools=[tool_schema],
+                    tool_choice={"type": "function", "function": {"name": "explain_exception"}},
+                    temperature=0.0,
+                    max_tokens=600
+                )
             )
             
-            # Parse the tool response
-            result = self._parse_tool_response(response, ExplainExceptionResponse)
-            return result
+            return self._parse_tool_response(response, ExplainExceptionResponse)
             
         except Exception as e:
             return {"valid": False, "error": str(e)}
@@ -120,14 +144,14 @@ class ClaudeClient:
         record_b: Dict
     ) -> Dict[str, Any]:
         """
-        Ask Claude to propose a resolution for an exception.
+        Ask Groq to propose a resolution for an exception with Chain-of-Thought.
         
         Args:
             record_a: Settlement record
             record_b: Counterpart record
             
         Returns:
-            Dict with action, confidence, reasoning, and valid flag
+            Dict with action, confidence, reasoning, thought_process, and valid flag
         """
         if not self.client:
             return {"valid": False, "error": "Client not initialized"}
@@ -135,55 +159,92 @@ class ClaudeClient:
         try:
             user_prompt = build_propose_prompt(record_a, record_b)
             
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=300,
-                system=PROPOSE_RESOLUTION_SYSTEM,
-                messages=[{"role": "user", "content": user_prompt}],
-                tools=[{
+            tool_schema = {
+                "type": "function",
+                "function": {
                     "name": "propose_resolution",
-                    "description": "Propose a resolution for a reconciliation exception",
-                    "input_schema": {
+                    "description": "Perform step-by-step reasoning and propose a resolution for a reconciliation exception",
+                    "parameters": {
                         "type": "object",
                         "properties": {
+                            "thought_process": {
+                                "type": "string",
+                                "description": "Chain-of-thought analysis verifying amount delta, date lag, and reference correlation"
+                            },
                             "action": {
                                 "type": "string",
                                 "enum": ["match", "flag_for_human", "reject_duplicate"]
                             },
-                            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                            "reasoning": {"type": "string"}
+                            "confidence": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "Confidence score between 0 and 1"
+                            },
+                            "reasoning": {
+                                "type": "string",
+                                "description": "Justification for the proposed action"
+                            }
                         },
-                        "required": ["action", "confidence", "reasoning"]
+                        "required": ["thought_process", "action", "confidence", "reasoning"]
                     }
-                }],
-                tool_choice={"type": "tool", "name": "propose_resolution"}
+                }
+            }
+            
+            response = self._execute_with_retry(
+                lambda: self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": PROPOSE_RESOLUTION_SYSTEM},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    tools=[tool_schema],
+                    tool_choice={"type": "function", "function": {"name": "propose_resolution"}},
+                    temperature=0.0,
+                    max_tokens=600
+                )
             )
             
-            # Parse the tool response
-            result = self._parse_tool_response(response, ProposeResolutionResponse)
-            return result
+            return self._parse_tool_response(response, ProposeResolutionResponse)
             
         except Exception as e:
             return {"valid": False, "error": str(e)}
+            
+    def _execute_with_retry(self, api_callable, max_retries: int = 2):
+        """Execute Groq API call with exponential backoff on transient network failures."""
+        last_err = None
+        for attempt in range(max_retries + 1):
+            try:
+                return api_callable()
+            except Exception as e:
+                last_err = e
+                if attempt < max_retries:
+                    time.sleep(1.0 * (2 ** attempt))
+                else:
+                    raise last_err
     
-    def _parse_tool_response(self, response: 'AnthropicMessage', schema_class) -> Dict[str, Any]:
+    def _parse_tool_response(self, response: Any, schema_class) -> Dict[str, Any]:
         """
-        Parse and validate a tool response using Pydantic.
+        Parse and validate a tool/function call response using Pydantic.
         
-        Fail closed - any validation error returns invalid result.
+        Fail closed - any validation error returns an invalid result.
         """
         try:
-            # Extract tool use from response
-            tool_use = None
-            for content_block in response.content:
-                if content_block.type == "tool_use":
-                    tool_use = content_block
-                    break
+            choice = response.choices[0]
+            message = choice.message
             
-            if not tool_use:
-                return {"valid": False, "error": "No tool use in response"}
-            
-            input_data = tool_use.input
+            # Extract arguments from function tool call
+            if hasattr(message, 'tool_calls') and message.tool_calls:
+                tool_call = message.tool_calls[0]
+                raw_args = tool_call.function.arguments
+                if isinstance(raw_args, str):
+                    input_data = json.loads(raw_args)
+                else:
+                    input_data = raw_args
+            elif message.content:
+                input_data = json.loads(message.content)
+            else:
+                return {"valid": False, "error": "No tool call or parseable content in response"}
             
             # Validate against Pydantic schema
             validated = schema_class(**input_data)
@@ -197,9 +258,15 @@ class ClaudeClient:
             return {"valid": False, "error": f"Validation failed: {str(e)}"}
 
 
-def create_client() -> Optional[ClaudeClient]:
-    """Factory function to create a Claude client, returning None if unavailable."""
+# Backward compatibility aliases
+ClaudeClient = GroqClient
+LLMClient = GroqClient
+
+
+def create_client() -> Optional[GroqClient]:
+    """Factory function to create a Groq client, returning None if unavailable."""
     try:
-        return ClaudeClient()
+        return GroqClient()
     except (ImportError, ValueError):
         return None
+

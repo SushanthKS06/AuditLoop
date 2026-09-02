@@ -1,32 +1,27 @@
-"""
-LLM Prompts - Scoped and minimal
+from typing import Optional, Dict, Any
+from .privacy import sanitize_record_for_llm
 
-The LLM receives only the specific records under consideration,
-not the entire dataset. This is a deliberate reliability choice.
-"""
-
-EXPLAIN_EXCEPTION_SYSTEM = """You are analyzing financial reconciliation exceptions.
-Your job is to identify the ROOT CAUSE of why two records couldn't be matched.
+EXPLAIN_EXCEPTION_SYSTEM = """You are an expert financial reconciliation controller analyzing reconciliation exceptions.
+Your job is to perform step-by-step deduction (thought_process) and identify the ROOT CAUSE of why two records couldn't be matched deterministically.
 
 You will receive:
 - A settlement record from Razorpay
 - Optionally, a counterpart record (bank transaction or ledger entry)
 
 Classify the root cause into ONE of these categories:
-- "rounding": Minor numerical differences (<2%) likely from rounding or fee calculations
+- "rounding": Numerical difference from rounding or gateway MDR fee calculations
 - "timing_lag": Date mismatches due to settlement delays (T+1, T+2 common in India)
-- "duplicate_suspected": Same amount appears multiple times, possible duplicate entry
-- "partial_refund": One record may be a partial refund of another
+- "duplicate_suspected": Same amount appears multiple times across different orders
+- "partial_refund": One record may be a partial refund or split debit
 - "no_counterpart": Record has no matching counterpart in other systems
-- "currency_formatting": Differences due to currency symbols, commas, formatting
+- "currency_formatting": Differences due to currency symbols, commas, or text noise
 - "unclassified": None of the above clearly apply
 
 Respond with:
-1. root_cause: The category that best fits
-2. explanation: Brief explanation citing specific field differences
-3. confidence: Your confidence 0-1
-
-Be conservative. If unsure, use lower confidence."""
+1. thought_process: Step-by-step mathematical and temporal deduction
+2. root_cause: The category that best fits
+3. explanation: Brief explanation citing specific field differences
+4. confidence: Your confidence 0-1"""
 
 
 PROPOSE_RESOLUTION_SYSTEM = """You are proposing resolutions for financial reconciliation exceptions.
@@ -36,7 +31,7 @@ You will receive:
 - A counterpart record (bank transaction or ledger entry)
 
 Propose ONE of these actions:
-- "match": Records represent the same underlying transaction
+- "match": Records represent the same underlying transaction (will be re-verified deterministically)
 - "flag_for_human": Need human review (uncertain, high-value, or complex case)
 - "reject_duplicate": Records appear to be duplicates or unrelated
 
@@ -47,51 +42,89 @@ CRITICAL RULES:
 4. Your proposal will be re-verified deterministically before any match is committed
 
 Respond with:
-1. action: Your proposed resolution
-2. confidence: Your confidence 0-1
-3. reasoning: Justification citing specific fields
+1. thought_process: Step-by-step analysis comparing amount, date, and identifiers
+2. action: Your proposed resolution
+3. confidence: Your confidence 0-1
+4. reasoning: Justification citing specific fields"""
 
-Your proposal does NOT commit a match - it will be verified before counting."""
+
+def get_contextual_exemplar(settlement: Optional[Dict], counterpart: Optional[Dict]) -> str:
+    """Dynamically select the most relevant few-shot exemplar based on record features."""
+    if not settlement or not counterpart:
+        return "Reference Exemplar (Orphan Record):\nSettlement exists with no counterpart in bank/ledger.\nThought Process: Single unlinked transaction.\nClassification: root_cause='no_counterpart', confidence=0.95"
+    
+    sett_amt = float(settlement.get('settled_amount') or settlement.get('amount') or 0)
+    count_amt = float(counterpart.get('amount') or counterpart.get('expected_amount') or 0)
+    
+    # 1. High value detection
+    if max(sett_amt, count_amt) >= 50000:
+        return "Reference Exemplar (High-Value Transaction):\nRecords: Amount is 150,000 INR with slight date divergence.\nThought Process: Exceeds automated match risk ceiling. Human reviewer sign-off required.\nProposal: action='flag_for_human', confidence=0.88"
+        
+    # 2. Fee / Rounding detection (1% to 4% delta)
+    if sett_amt > 0 and count_amt > 0:
+        diff_pct = abs(sett_amt - count_amt) / max(sett_amt, count_amt) * 100
+        if 1.0 <= diff_pct <= 4.0:
+            return "Reference Exemplar (MDR Fee Deduction):\nSettlement: amount=976.40, fee=23.60 | Ledger: expected_amount=1000.00\nThought Process: Net settlement 976.40 plus fee 23.60 matches gross amount 1000.00 (2% MDR + 18% GST).\nClassification: root_cause='rounding', action='match', confidence=0.95"
+            
+    # 3. Duplicate suspicion (identical amount, conflicting IDs)
+    sett_order = str(settlement.get('order_id') or '')
+    count_order = str(counterpart.get('order_id') or counterpart.get('narration') or '')
+    if abs(sett_amt - count_amt) < 0.01 and sett_order and count_order and sett_order not in count_order:
+        return "Reference Exemplar (Duplicate Suspicion):\nSettlement: amount=4500.00, order_id=ORD_101 | Bank: amount=4500.00, narration='ORD_999'\nThought Process: Amounts match but references refer to conflicting order IDs.\nClassification: root_cause='duplicate_suspected', action='reject_duplicate', confidence=0.90"
+        
+    # Default: settlement lag
+    return "Reference Exemplar (Settlement Lag):\nSettlement: created_at=2026-09-03 | Bank: value_date=2026-09-01\nThought Process: Bank value date precedes settlement date by 2 days, matching standard T+2 Indian banking cycle.\nClassification: root_cause='timing_lag', confidence=0.90"
 
 
 def build_explain_prompt(settlement: dict, counterpart: dict = None) -> str:
-    """Build the prompt for explain_exception tool call."""
+    """Build the prompt for explain_exception tool call with dynamic exemplar injection and PII sanitization."""
+    safe_settlement = sanitize_record_for_llm(settlement)
+    safe_counterpart = sanitize_record_for_llm(counterpart)
     
-    sett_str = _format_record(settlement, "Settlement")
-    count_str = _format_record(counterpart, "Counterpart") if counterpart else "No counterpart record available."
+    exemplar = get_contextual_exemplar(safe_settlement, safe_counterpart)
+    sett_str = _format_record(safe_settlement, "Settlement")
+    count_str = _format_record(safe_counterpart, "Counterpart") if safe_counterpart else "No counterpart record available."
     
-    return f"""Analyze this exception:
+    return f"""Contextual Reference:
+{exemplar}
+
+Analyze this exception:
 
 {sett_str}
 
 {count_str}
 
-What is the root cause of the matching failure?"""
+Perform step-by-step reasoning (thought_process) and determine the root cause."""
 
 
 def build_propose_prompt(settlement: dict, counterpart: dict) -> str:
-    """Build the prompt for propose_resolution tool call."""
+    """Build the prompt for propose_resolution tool call with dynamic exemplar injection and PII sanitization."""
+    safe_settlement = sanitize_record_for_llm(settlement)
+    safe_counterpart = sanitize_record_for_llm(counterpart)
     
-    sett_str = _format_record(settlement, "Settlement")
-    count_str = _format_record(counterpart, "Counterpart")
+    exemplar = get_contextual_exemplar(safe_settlement, safe_counterpart)
+    sett_str = _format_record(safe_settlement, "Settlement")
+    count_str = _format_record(safe_counterpart, "Counterpart")
     
-    return f"""Propose a resolution for these records:
+    return f"""Contextual Reference:
+{exemplar}
+
+Propose a resolution for these records:
 
 {sett_str}
 
 {count_str}
 
-Should these be matched, flagged for review, or rejected as duplicates?"""
+Perform step-by-step reasoning (thought_process) and propose an action."""
 
 
 def _format_record(record: dict, label: str) -> str:
-    """Format a record for the prompt."""
+    """Format a sanitized record for the prompt."""
     if not record:
         return f"{label}: None"
     
     lines = [f"{label}:"]
     
-    # Key fields to include
     key_fields = [
         ('entity_id', 'Entity ID'),
         ('order_id', 'Order ID'),
@@ -114,3 +147,5 @@ def _format_record(record: dict, label: str) -> str:
             lines.append(f"  {display}: {record[key]}")
     
     return "\n".join(lines)
+
+
