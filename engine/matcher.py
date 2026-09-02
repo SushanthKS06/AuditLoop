@@ -553,7 +553,7 @@ class DeterministicMatcher:
                 sett = row.get('settlement', {}) or {}
                 count = row.get('bank') or row.get('ledger') or {}
                 sett_id = str(sett.get('entity_id') or sett.get('payment_id') or sett.get('settlement_id') or '')
-                count_id = str(count.get('txn_id') or count.get('order_id') or count.get('ledger_id') or count.get('reference') or count.get('utr') or '')
+                count_id = str(count.get('txn_id') or count.get('order_id') or count.get('payment_id') or count.get('customer_ref') or count.get('utr') or '')
                 rec_id = f"{sett_id}-{count_id}" if sett_id and count_id else (sett_id or count_id)
                 exceptions.append({
                     'type': 'low_confidence',
@@ -596,7 +596,7 @@ class DeterministicMatcher:
                 r = row.to_dict()
                 exceptions.append({
                     'type': 'unmatched_ledger',
-                    'record_ids': str(r.get('ledger_id') or r.get('reference') or ''),
+                    'record_ids': str(r.get('order_id') or r.get('payment_id') or r.get('customer_ref') or ''),
                     'settlement': None,
                     'counterpart': r,
                     'confidence': 0.0,

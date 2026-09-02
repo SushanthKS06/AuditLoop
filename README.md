@@ -147,10 +147,10 @@ This will:
 pip install -r requirements.txt
 
 # Generate synthetic data (uses sample batch if no API keys)
-python data/generate_data.py --records 80 --seed 42
+python data/generate_data.py --records 56 --seed 42
 
 # Run the full pipeline
-python run_pipeline.py --force-disagreement --records 50
+python run_pipeline.py --force-disagreement --records 56
 
 # View metrics
 cat metrics_report.json
@@ -173,10 +173,10 @@ cp .env.example .env
 python data/fetch_settlements.py --year 2026 --month 9 --day 1
 
 # 4. Generate linked synthetic data
-python data/generate_data.py --records 80 --seed 42 --settlements data/settlements_live.csv
+python data/generate_data.py --records 56 --seed 42 --settlements data/settlements_live.csv
 
 # 5. Run pipeline
-python run_pipeline.py --force-disagreement
+python run_pipeline.py --force-disagreement --records 56
 ```
 
 ## Configuration
@@ -225,11 +225,11 @@ numbers from scratch (same seed → same output):
 
 ```bash
 # Step 1: Rebuild ground truth and synthetic data (same seed as pipeline)
-python data/build_ground_truth.py --records 80 --seed 42
+python data/build_ground_truth.py --records 56 --seed 42
 
 # Step 2: Run the full reconciliation pipeline
 #   (with LLM if GROQ_API_KEY is set, without otherwise)
-python run_pipeline.py --seed 42 --records 80
+python run_pipeline.py --seed 42 --records 56
 
 # Step 3: Inspect metrics  (also written to metrics/metrics_report.json)
 cat metrics_report.json
@@ -260,12 +260,12 @@ To guarantee at least one LLM-vs-deterministic disagreement is visible in every 
 
 ```bash
 # Same seed = same results (proves determinism)
-python run_pipeline.py --seed 42 --records 50
-python run_pipeline.py --seed 42 --records 50  # Identical output
+python run_pipeline.py --seed 42 --records 56
+python run_pipeline.py --seed 42 --records 56  # Identical output
 
 # Different seed = different but valid results (proves not hardcoded)
-python run_pipeline.py --seed 123 --records 50
-python run_pipeline.py --seed 456 --records 50
+python run_pipeline.py --seed 123 --records 56
+python run_pipeline.py --seed 456 --records 56
 ```
 
 ## License

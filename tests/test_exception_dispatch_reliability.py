@@ -45,9 +45,9 @@ class TestExceptionRecordIDs:
         
         # 4. Unmatched ledger
         unmatched_ledger = pd.DataFrame([{
-            'ledger_id': 'LED_505',
+            'order_id': 'ORD_505',
             'expected_amount': 3200.0,
-            'reference': 'REF_505'
+            'payment_id': 'PAY_505'
         }])
         
         exceptions = matcher.get_exceptions(
@@ -67,7 +67,7 @@ class TestExceptionRecordIDs:
         assert exceptions[0]['record_ids'] == "sett_101-TXN_202"
         assert exceptions[1]['record_ids'] == "sett_303"
         assert exceptions[2]['record_ids'] == "TXN_404"
-        assert exceptions[3]['record_ids'] == "LED_505"
+        assert exceptions[3]['record_ids'] == "ORD_505"
 
 
 class TestExceptionDispatcherReliability:
