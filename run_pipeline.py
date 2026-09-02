@@ -200,6 +200,22 @@ class ReconciliationPipeline:
         for match in self.all_matches:
             self.all_results.append(match)
         
+        # Step 4.5: Transaction-level deduplication
+        # A single real-world transaction can produce multiple rows if different
+        # pipeline legs (settlement, bank, ledger) processed it independently.
+        # Collapse all rows that share a payment_id / order_id / utr / bank_txn_id
+        # into exactly one row per transaction.  Exception status always wins over
+        # 'matched' — a transaction is only matched when every leg agrees.
+        print("\n[Step 4.5] Deduplicating cross-source results...")
+        pre_dedup_count = len(self.all_results)
+        self.all_results = self._deduplicate_results(self.all_results)
+        dedup_removed = pre_dedup_count - len(self.all_results)
+        if dedup_removed > 0:
+            print(f"  Removed {dedup_removed} duplicate cross-source row(s) — "
+                  f"{len(self.all_results)} unique transactions remain.")
+        else:
+            print(f"  No duplicates found — {len(self.all_results)} unique transactions.")
+        
         # Save results
         results_path = "results.json"
         with open(results_path, 'w') as f:
@@ -225,6 +241,115 @@ class ReconciliationPipeline:
             'exceptions_count': len(exceptions)
         }
     
+    def _deduplicate_results(self, results: list) -> list:
+        """
+        Collapse cross-source result rows so each real-world transaction
+        appears exactly once in the output.
+
+        Algorithm
+        ---------
+        1. Extract every usable identifier (payment_id, order_id, utr,
+           bank_txn_id) from each row — including from nested dicts
+           (settlement, counterpart, bank, ledger).
+        2. Use union-find to group rows that share any identifier.
+        3. For each group, pick the single most-severe final_status
+           (exception/disagreement beats 'matched').
+        4. Emit one representative row per group, with the winning status.
+
+        Precedence (highest severity first):
+          llm_deterministic_disagreement > unresolved_exception >
+          explained_no_resolution > low_confidence >
+          matched_llm_verified > matched
+        """
+        # Status severity map — lower number = more severe / wins over matched
+        STATUS_SEVERITY = {
+            'llm_deterministic_disagreement': 0,
+            'unresolved_exception': 1,
+            'explained_no_resolution': 2,
+            'low_confidence': 3,
+            'llm_error': 4,
+            'llm_unavailable': 4,
+            'matched_llm_verified': 5,
+            'matched': 6,
+        }
+
+        def _severity(status: str) -> int:
+            return STATUS_SEVERITY.get(status, 3)  # unknown = treat as exception
+
+        def _extract_ids(row: dict) -> set:
+            """Pull all non-empty identifier strings from a result row."""
+            ids: set = set()
+            direct_keys = [
+                'payment_id', 'order_id', 'settlement_utr', 'utr',
+                'txn_id', 'bank_txn_id', 'entity_id', 'settlement_id'
+            ]
+            for k in direct_keys:
+                v = row.get(k)
+                if v and str(v).strip() and str(v).lower() not in ('none', 'nan'):
+                    ids.add(f"{k}:{str(v).lower().strip()}")
+            # Also look inside nested dicts
+            for nest_key in ('settlement', 'counterpart', 'bank', 'ledger'):
+                nested = row.get(nest_key)
+                if isinstance(nested, dict):
+                    for k in direct_keys:
+                        v = nested.get(k)
+                        if v and str(v).strip() and str(v).lower() not in ('none', 'nan'):
+                            ids.add(f"{k}:{str(v).lower().strip()}")
+            return ids
+
+        if not results:
+            return results
+
+        n = len(results)
+        # parent[i] = i means i is its own group representative
+        parent = list(range(n))
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a, b):
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        # Build identifier -> first row index map
+        id_to_first: dict = {}
+        row_ids = [_extract_ids(r) for r in results]
+
+        for i, ids in enumerate(row_ids):
+            for ident in ids:
+                if ident in id_to_first:
+                    union(id_to_first[ident], i)
+                else:
+                    id_to_first[ident] = i
+
+        # Group rows by root representative
+        from collections import defaultdict
+        groups: dict = defaultdict(list)
+        for i in range(n):
+            groups[find(i)].append(i)
+
+        deduplicated = []
+        for rep, indices in groups.items():
+            if len(indices) == 1:
+                deduplicated.append(results[indices[0]])
+            else:
+                # Pick the row with the most severe status
+                best_idx = min(
+                    indices,
+                    key=lambda i: _severity(results[i].get('final_status', ''))
+                )
+                winner = dict(results[best_idx])
+                # Tag it so the audit trail is transparent
+                if len(indices) > 1:
+                    winner['_merged_from_count'] = len(indices)
+                deduplicated.append(winner)
+
+        return deduplicated
+
     def _load_or_generate_data(
         self,
         settlements_path: str,

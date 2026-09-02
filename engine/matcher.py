@@ -207,6 +207,9 @@ class DeterministicMatcher:
             if sett['utr_norm'] and sett['utr_norm'] in bank_by_utr:
                 for b in bank_by_utr[sett['utr_norm']]:
                     if b.name not in matched_bank_ids:
+                        # Guard: bank row must have a usable amount
+                        if self._normalize_amount(b.get('amount')) is None:
+                            continue
                         matched_bank_row = b
                         rule_fired.append('utr_exact_match')
                         break
@@ -214,14 +217,30 @@ class DeterministicMatcher:
             if matched_bank_row is None and sett['payment_norm'] and sett['payment_norm'] in bank_by_payment:
                 for b in bank_by_payment[sett['payment_norm']]:
                     if b.name not in matched_bank_ids:
+                        # Guard: bank row must have a usable amount
+                        if self._normalize_amount(b.get('amount')) is None:
+                            continue
+                        # Guard: if both settlement and bank have non-empty UTRs and
+                        # they DISAGREE, this bank row is an orphan/wrong counterpart.
+                        # (The primary UTR path already enforces exact agreement;
+                        #  this path only fires when settlement UTR found nothing in bank.)
+                        sett_utr = self._normalize_text(sett.get('settlement_utr', ''))
+                        bank_utr = self._normalize_text(b.get('utr', ''))
+                        if sett_utr and bank_utr and sett_utr != bank_utr:
+                            # Cross-identifier UTR conflict: skip this candidate
+                            continue
                         matched_bank_row = b
                         rule_fired.append('payment_id_bank_match')
                         break
+
             
             # 2. Match Ledger (order_id first, then payment_id)
             if sett['order_norm'] and sett['order_norm'] in ledger_by_order:
                 for l in ledger_by_order[sett['order_norm']]:
                     if l.name not in matched_ledger_ids:
+                        # Guard: ledger row must have a usable amount
+                        if self._normalize_amount(l.get('expected_amount')) is None:
+                            continue
                         matched_ledger_row = l
                         rule_fired.append('order_exact_match')
                         break
@@ -229,6 +248,17 @@ class DeterministicMatcher:
             if matched_ledger_row is None and sett['payment_norm'] and sett['payment_norm'] in ledger_by_payment:
                 for l in ledger_by_payment[sett['payment_norm']]:
                     if l.name not in matched_ledger_ids:
+                        # Guard 1: ledger row must have a usable amount (orphan check)
+                        if self._normalize_amount(l.get('expected_amount')) is None:
+                            continue
+                        # Guard 2: if both settlement and ledger have an order_id and
+                        # they DISAGREE, this is a duplicate-suspect / wrong-counterpart
+                        # scenario — reject rather than committing on payment_id alone.
+                        sett_order = self._normalize_text(sett.get('order_id', ''))
+                        ledger_order = self._normalize_text(l.get('order_id', ''))
+                        if sett_order and ledger_order and sett_order != ledger_order:
+                            # Cross-identifier conflict: skip this candidate
+                            continue
                         matched_ledger_row = l
                         rule_fired.append('payment_id_ledger_match')
                         break
@@ -271,6 +301,7 @@ class DeterministicMatcher:
                     'match_type': match_type,
                     'final_status': 'matched'
                 })
+
         
         # Build unmatched DataFrames
         unmatched_settlements = sett_df[~sett_df.index.isin(matched_settlement_ids)]

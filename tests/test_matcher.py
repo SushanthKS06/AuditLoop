@@ -257,3 +257,123 @@ class TestNormalization:
         assert matcher._normalize_text("nan") == ""
         assert matcher._normalize_text("None") == ""
 
+class TestOrphanAndDuplicateRejection:
+    """
+    Regression tests for Bug 1 (matcher guards).
+
+    Verifies that orphan_bank and duplicate_suspect records -- generated
+    with the exact same patterns used by generate_data.py -- never resolve
+    to matched in Stage 1.
+    """
+
+    def test_orphan_bank_ledger_null_amount_not_matched(self):
+        """orphan_bank: ledger row has NaN expected_amount. Stage 1 must NOT match."""
+        from engine.matcher import DeterministicMatcher
+        import pandas as pd
+        matcher = DeterministicMatcher()
+        settlements = pd.DataFrame([{
+            "entity_id": "sett_orphan",
+            "order_id": "ORD_SYNTH_0099",
+            "payment_id": "PAY_SYNTH_0099",
+            "settlement_utr": "UTR999000",
+            "amount": 10000.0,
+            "settled_amount": 9800.0,
+            "fee": 200.0,
+            "created_at": "2026-09-01",
+            "settled_at": "2026-09-02",
+        }])
+        bank = pd.DataFrame()
+        ledger = pd.DataFrame([{
+            "order_id": "ORD_ORPHAN_1234",
+            "expected_amount": None,
+            "order_date": "2026-09-01",
+            "payment_id": "PAY_SYNTH_0099",
+            "status": "pending",
+        }])
+        matched, unmatched_sett, _, _, _ = matcher.stage1_exact_match(settlements, bank, ledger)
+        assert len(matched) == 0, "Orphan ledger row with NaN amount must NOT produce a match."
+        assert len(unmatched_sett) == 1
+
+    def test_duplicate_suspect_conflicting_order_id_not_matched(self):
+        """duplicate_suspect: same payment_id but different order_id. Stage 1 must NOT match."""
+        from engine.matcher import DeterministicMatcher
+        import pandas as pd
+        matcher = DeterministicMatcher()
+        settlements = pd.DataFrame([{
+            "entity_id": "sett_dup",
+            "order_id": "ORD_SYNTH_0015",
+            "payment_id": "PAY_SYNTH_0015",
+            "settlement_utr": "UTR905934",
+            "amount": 32083.99,
+            "settled_amount": 31473.87,
+            "fee": 610.12,
+            "created_at": "2026-09-01",
+            "settled_at": "2026-09-02",
+        }])
+        bank = pd.DataFrame()
+        ledger = pd.DataFrame([{
+            "order_id": "ORD_DUP_9201",
+            "expected_amount": 32083.99,
+            "order_date": "2026-09-01",
+            "payment_id": "PAY_SYNTH_0015",
+            "status": "completed",
+        }])
+        matched, unmatched_sett, _, _, _ = matcher.stage1_exact_match(settlements, bank, ledger)
+        assert len(matched) == 0, "Conflicting order_id must NOT match via payment_id alone."
+        assert len(unmatched_sett) == 1
+
+    def test_bank_null_amount_not_matched(self):
+        """Bank row with None amount must not produce a Stage 1 match."""
+        from engine.matcher import DeterministicMatcher
+        import pandas as pd
+        matcher = DeterministicMatcher()
+        settlements = pd.DataFrame([{
+            "entity_id": "sett_001",
+            "order_id": "ORD_001",
+            "payment_id": "PAY_001",
+            "settlement_utr": "UTR111111",
+            "amount": 5000.0,
+            "settled_amount": 4900.0,
+            "created_at": "2026-09-01",
+            "settled_at": "2026-09-02",
+        }])
+        bank = pd.DataFrame([{
+            "txn_id": "TXN_NULL",
+            "utr": "UTR111111",
+            "amount": None,
+            "value_date": "2026-09-02",
+            "narration": "",
+            "reference": "PAY_001",
+        }])
+        ledger = pd.DataFrame()
+        matched, unmatched_sett, _, _, _ = matcher.stage1_exact_match(settlements, bank, ledger)
+        assert len(matched) == 0, "Bank row with None amount must NOT produce a match."
+
+    def test_orphan_bank_cross_utr_conflict_not_matched(self):
+        """Bank UTR_ORPHAN_* conflicts with settlement_utr. Must not match via payment_id."""
+        from engine.matcher import DeterministicMatcher
+        import pandas as pd
+        matcher = DeterministicMatcher()
+        settlements = pd.DataFrame([{
+            "entity_id": "sett_orphan2",
+            "order_id": "ORD_SYNTH_0017",
+            "payment_id": "PAY_SYNTH_0017",
+            "settlement_utr": "UTR916449",
+            "amount": 46129.46,
+            "settled_amount": 44813.0,
+            "fee": 1316.46,
+            "created_at": "2026-09-01",
+            "settled_at": "2026-09-02",
+        }])
+        bank = pd.DataFrame([{
+            "txn_id": "TXN_ORPHAN_99",
+            "utr": "UTR_ORPHAN_351083",
+            "amount": 44813.0,
+            "value_date": "2026-09-02",
+            "narration": "",
+            "reference": "PAY_SYNTH_0017",
+        }])
+        ledger = pd.DataFrame()
+        matched, unmatched_sett, _, _, _ = matcher.stage1_exact_match(settlements, bank, ledger)
+        assert len(matched) == 0, "UTR conflict must prevent match via payment_id."
+        assert len(unmatched_sett) == 1
