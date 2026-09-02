@@ -208,6 +208,7 @@ class ReconciliationPipeline:
         # 'matched' — a transaction is only matched when every leg agrees.
         print("\n[Step 4.5] Deduplicating cross-source results...")
         pre_dedup_count = len(self.all_results)
+        
         self.all_results = self._deduplicate_results(self.all_results)
         dedup_removed = pre_dedup_count - len(self.all_results)
         if dedup_removed > 0:
@@ -215,6 +216,27 @@ class ReconciliationPipeline:
                   f"{len(self.all_results)} unique transactions remain.")
         else:
             print(f"  No duplicates found — {len(self.all_results)} unique transactions.")
+
+        # POST-DEDUP SANITY CHECK
+        # Ensure no valid input settlement entity_ids were silently dropped
+        if settlements_df is not None and not settlements_df.empty:
+            output_entities = set()
+            for r in self.all_results:
+                for k in ['entity_id', 'settlement_id']:
+                    if r.get(k): output_entities.add(str(r.get(k)).strip().lower())
+                for nest in ['settlement', 'counterpart', 'bank', 'ledger']:
+                    if isinstance(r.get(nest), dict):
+                        for k in ['entity_id', 'settlement_id']:
+                            if r[nest].get(k): output_entities.add(str(r[nest].get(k)).strip().lower())
+                            
+            import pandas as pd
+            input_entities = set(str(e).strip().lower() for e in settlements_df['entity_id'] if pd.notna(e))
+            missing = input_entities - output_entities
+            if missing:
+                raise RuntimeError(
+                    f"Silent record loss detected! {len(missing)} settlements were dropped "
+                    f"from final results completely. Missing entity_ids: {missing}"
+                )
         
         # Save results
         results_path = "results.json"
@@ -248,20 +270,14 @@ class ReconciliationPipeline:
 
         Algorithm
         ---------
-        1. Extract every usable identifier (payment_id, order_id, utr,
-           bank_txn_id) from each row — including from nested dicts
-           (settlement, counterpart, bank, ledger).
-        2. Use union-find to group rows that share any identifier.
-        3. For each group, pick the single most-severe final_status
-           (exception/disagreement beats 'matched').
-        4. Emit one representative row per group, with the winning status.
-
-        Precedence (highest severity first):
-          llm_deterministic_disagreement > unresolved_exception >
-          explained_no_resolution > low_confidence >
-          matched_llm_verified > matched
+        1. Extract every usable identifier from each row into an id_dict.
+        2. Build a graph: edges connect rows that share at least one identifier value.
+        3. Find connected components.
+        4. If a component has ANY conflicting identifiers between any of its members,
+           it represents distinct transactions incorrectly tied together (e.g., duplicate UTRs).
+           Do NOT collapse them; emit them individually as 'unresolved_exception'.
+        5. If a component is conflict-free, collapse it into one representative row.
         """
-        # Status severity map — lower number = more severe / wins over matched
         STATUS_SEVERITY = {
             'llm_deterministic_disagreement': 0,
             'unresolved_exception': 1,
@@ -274,11 +290,10 @@ class ReconciliationPipeline:
         }
 
         def _severity(status: str) -> int:
-            return STATUS_SEVERITY.get(status, 3)  # unknown = treat as exception
+            return STATUS_SEVERITY.get(status, 3)
 
-        def _extract_ids(row: dict) -> set:
-            """Pull all non-empty identifier strings from a result row."""
-            ids: set = set()
+        def _extract_id_dict(row: dict) -> dict:
+            ids = {}
             direct_keys = [
                 'payment_id', 'order_id', 'settlement_utr', 'utr',
                 'txn_id', 'bank_txn_id', 'entity_id', 'settlement_id'
@@ -286,67 +301,110 @@ class ReconciliationPipeline:
             for k in direct_keys:
                 v = row.get(k)
                 if v and str(v).strip() and str(v).lower() not in ('none', 'nan'):
-                    ids.add(f"{k}:{str(v).lower().strip()}")
-            # Also look inside nested dicts
+                    key_group = 'utr' if k in ('utr', 'settlement_utr') else (
+                        'txn_id' if k in ('txn_id', 'bank_txn_id') else k
+                    )
+                    ids.setdefault(key_group, set()).add(str(v).lower().strip())
+                    
             for nest_key in ('settlement', 'counterpart', 'bank', 'ledger'):
                 nested = row.get(nest_key)
                 if isinstance(nested, dict):
                     for k in direct_keys:
                         v = nested.get(k)
                         if v and str(v).strip() and str(v).lower() not in ('none', 'nan'):
-                            ids.add(f"{k}:{str(v).lower().strip()}")
+                            key_group = 'utr' if k in ('utr', 'settlement_utr') else (
+                                'txn_id' if k in ('txn_id', 'bank_txn_id') else k
+                            )
+                            ids.setdefault(key_group, set()).add(str(v).lower().strip())
             return ids
+
+        def _has_conflict(ids1: dict, ids2: dict) -> bool:
+            for k in ids1:
+                if k in ids2:
+                    if not ids1[k].intersection(ids2[k]):
+                        return True
+            return False
+
+        def _share_identifier(ids1: dict, ids2: dict) -> bool:
+            for k in ids1:
+                if k in ids2:
+                    if ids1[k].intersection(ids2[k]):
+                        return True
+            return False
 
         if not results:
             return results
 
         n = len(results)
-        # parent[i] = i means i is its own group representative
-        parent = list(range(n))
-
-        def find(x):
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
-            return x
-
-        def union(a, b):
-            ra, rb = find(a), find(b)
-            if ra != rb:
-                parent[rb] = ra
-
-        # Build identifier -> first row index map
-        id_to_first: dict = {}
-        row_ids = [_extract_ids(r) for r in results]
-
-        for i, ids in enumerate(row_ids):
-            for ident in ids:
-                if ident in id_to_first:
-                    union(id_to_first[ident], i)
-                else:
-                    id_to_first[ident] = i
-
-        # Group rows by root representative
+        id_dicts = [_extract_id_dict(r) for r in results]
+        
         from collections import defaultdict
-        groups: dict = defaultdict(list)
+        adj = defaultdict(list)
         for i in range(n):
-            groups[find(i)].append(i)
+            for j in range(i+1, n):
+                if _share_identifier(id_dicts[i], id_dicts[j]):
+                    adj[i].append(j)
+                    adj[j].append(i)
+
+        visited = set()
+        groups = []
+        for i in range(n):
+            if i not in visited:
+                comp = []
+                q = [i]
+                visited.add(i)
+                while q:
+                    curr = q.pop(0)
+                    comp.append(curr)
+                    for neighbor in adj[curr]:
+                        if neighbor not in visited:
+                            visited.add(neighbor)
+                            q.append(neighbor)
+                groups.append(comp)
 
         deduplicated = []
-        for rep, indices in groups.items():
-            if len(indices) == 1:
-                deduplicated.append(results[indices[0]])
+        for comp in groups:
+            has_conflict = False
+            for i in range(len(comp)):
+                for j in range(i+1, len(comp)):
+                    if _has_conflict(id_dicts[comp[i]], id_dicts[comp[j]]):
+                        has_conflict = True
+                        break
+                if has_conflict:
+                    break
+            
+            if not has_conflict:
+                if len(comp) == 1:
+                    deduplicated.append(results[comp[0]])
+                else:
+                    best_idx = min(
+                        comp,
+                        key=lambda i: _severity(results[i].get('final_status', ''))
+                    )
+                    winner = dict(results[best_idx])
+                    winner['_merged_from_count'] = len(comp)
+                    
+                    # Merge missing identifiers from other rows into the winner
+                    # so it doesn't lose its entity_id/payment_id if an orphaned bank row was picked.
+                    for idx in comp:
+                        r = results[idx]
+                        for key in ['entity_id', 'settlement_id', 'payment_id', 'order_id']:
+                            if not winner.get(key) and r.get(key):
+                                winner[key] = r.get(key)
+                        if isinstance(r.get('settlement'), dict):
+                            for key in ['entity_id', 'settlement_id', 'payment_id', 'order_id']:
+                                if not winner.get(key) and r['settlement'].get(key):
+                                    winner[key] = r['settlement'].get(key)
+                                    
+                    deduplicated.append(winner)
             else:
-                # Pick the row with the most severe status
-                best_idx = min(
-                    indices,
-                    key=lambda i: _severity(results[i].get('final_status', ''))
-                )
-                winner = dict(results[best_idx])
-                # Tag it so the audit trail is transparent
-                if len(indices) > 1:
-                    winner['_merged_from_count'] = len(indices)
-                deduplicated.append(winner)
+                # Component is ambiguous; emit all individually as unresolved
+                for idx in comp:
+                    row_copy = dict(results[idx])
+                    row_copy['final_status'] = 'unresolved_exception'
+                    row_copy['type'] = 'ambiguous_shared_identifier'
+                    row_copy['_ambiguous_merge'] = True
+                    deduplicated.append(row_copy)
 
         return deduplicated
 
