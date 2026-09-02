@@ -362,9 +362,13 @@ class DeterministicMatcher:
         
         # For each unmatched settlement, find best candidate match
         for _, sett in settlements.iterrows():
-            best_score = 0.0
-            best_match = None
-            best_rule = None
+            best_bank_score = 0.0
+            best_bank_match = None
+            best_bank_rule = None
+            
+            best_ledger_score = 0.0
+            best_ledger_match = None
+            best_ledger_rule = None
             
             sett_amount = self._normalize_amount(sett.get('settled_amount') if pd.notna(sett.get('settled_amount')) else sett.get('amount'))
             sett_date = self._normalize_date(sett.get('settled_at') if pd.notna(sett.get('settled_at')) else sett.get('created_at'))
@@ -383,10 +387,10 @@ class DeterministicMatcher:
                     order_id=sett.get('order_id', '')
                 )
                 
-                if score > best_score:
-                    best_score = score
-                    best_match = ('bank', b_entry['row'])
-                    best_rule = rule
+                if score > best_bank_score:
+                    best_bank_score = score
+                    best_bank_match = b_entry['row']
+                    best_bank_rule = rule
             
             # Try matching against available ledger
             for l_entry in parsed_ledger:
@@ -400,40 +404,61 @@ class DeterministicMatcher:
                     fee1=sett_fee, is_ledger=True
                 )
                 
-                if score > best_score:
-                    best_score = score
-                    best_match = ('ledger', l_entry['row'])
-                    best_rule = rule
+                if score > best_ledger_score:
+                    best_ledger_score = score
+                    best_ledger_match = l_entry['row']
+                    best_ledger_rule = rule
             
-            if best_match and best_score > 0.4:
+            if best_bank_score > 0.4 or best_ledger_score > 0.4:
                 match_record = {
                     'settlement': sett.to_dict(),
-                    'bank': best_match[1].to_dict() if best_match[0] == 'bank' else None,
-                    'ledger': best_match[1].to_dict() if best_match[0] == 'ledger' else None,
-                    'match_type': f"fuzzy_{best_match[0]}",
-                    'confidence': round(best_score, 4),
-                    'rule_fired': best_rule
+                    'bank': best_bank_match.to_dict() if best_bank_match is not None and best_bank_score > 0.4 else None,
+                    'ledger': best_ledger_match.to_dict() if best_ledger_match is not None and best_ledger_score > 0.4 else None,
                 }
                 
-                # Ledger matches without a bank leg cannot be fully matched
-                if best_score >= self.confidence_threshold and best_match[0] == 'bank':
+                has_bank = match_record['bank'] is not None and best_bank_score >= self.confidence_threshold
+                has_ledger = match_record['ledger'] is not None and best_ledger_score >= self.confidence_threshold
+                
+                if has_bank and has_ledger:
+                    match_record['match_type'] = 'fuzzy_3way'
+                    match_record['confidence'] = round(min(best_bank_score, best_ledger_score), 4)
+                    match_record['rule_fired'] = f"{best_bank_rule}_and_{best_ledger_rule}"
                     match_record['final_status'] = 'matched'
                     matched_records.append(match_record)
                     decision = 'matched'
-                    matched_bank_ids.add(best_match[1].name)
+                    matched_bank_ids.add(best_bank_match.name)
+                    matched_ledger_ids.add(best_ledger_match.name)
+                    matched_settlement_ids.add(sett.name)
+                elif has_bank:
+                    match_record['match_type'] = 'fuzzy_bank'
+                    match_record['confidence'] = round(best_bank_score, 4)
+                    match_record['rule_fired'] = best_bank_rule
+                    match_record['final_status'] = 'matched'
+                    matched_records.append(match_record)
+                    decision = 'matched'
+                    matched_bank_ids.add(best_bank_match.name)
                     matched_settlement_ids.add(sett.name)
                 else:
+                    match_record['match_type'] = 'fuzzy_ledger' if match_record['ledger'] else 'fuzzy_bank'
+                    match_record['confidence'] = round(max(best_bank_score, best_ledger_score), 4)
+                    match_record['rule_fired'] = best_ledger_rule if match_record['ledger'] else best_bank_rule
                     match_record['final_status'] = 'low_confidence'
                     low_confidence_records.append(match_record)
                     decision = 'low_confidence'
                 
+                record_id_parts = [str(sett.get('entity_id', sett.get('payment_id', '')))]
+                if match_record['bank']:
+                    record_id_parts.append(str(match_record['bank'].get('txn_id', '')))
+                if match_record['ledger']:
+                    record_id_parts.append(str(match_record['ledger'].get('order_id', '')))
+                
                 audit_records.append({
-                    'record_ids': f"{sett.get('entity_id', sett.get('payment_id', ''))}-{best_match[1].get('txn_id', best_match[1].get('order_id', ''))}",
+                    'record_ids': "-".join(p for p in record_id_parts if p),
                     'stage': 'stage2_fuzzy',
-                    'rule_fired': best_rule,
-                    'confidence': round(best_score, 4),
+                    'rule_fired': match_record['rule_fired'],
+                    'confidence': match_record['confidence'],
                     'decision': decision,
-                    'match_type': f"fuzzy_{best_match[0]}",
+                    'match_type': match_record['match_type'],
                     'final_status': decision
                 })
         
@@ -518,6 +543,11 @@ class DeterministicMatcher:
                 text_score = 1.0
                 date_score = 1.0  # Override date penalty for explicit order_id matches
             elif order_norm and 'ord_' in text2_norm and order_norm not in text2_norm:
+                text_score = 0.0
+                amount_score = 0.0 # Heavy penalty for explicit order_id mismatch
+        elif is_ledger:
+            # text1 is sett order_id, text2 is ledger order_id
+            if text1_norm and text2_norm and text1_norm != text2_norm:
                 text_score = 0.0
                 amount_score = 0.0 # Heavy penalty for explicit order_id mismatch
         
