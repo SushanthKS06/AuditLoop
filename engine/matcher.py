@@ -379,7 +379,8 @@ class DeterministicMatcher:
                     sett_amount, sett_date, 
                     b_entry['amount'], b_entry['date'],
                     sett.get('settlement_utr', ''), b_entry['narration'],
-                    fee1=sett_fee, is_ledger=False
+                    fee1=sett_fee, is_ledger=False,
+                    order_id=sett.get('order_id', '')
                 )
                 
                 if score > best_score:
@@ -458,7 +459,8 @@ class DeterministicMatcher:
         text1: str,
         text2: str,
         fee1: Optional[float] = None,
-        is_ledger: bool = False
+        is_ledger: bool = False,
+        order_id: str = ""
     ) -> Tuple[float, str]:
         """
         Score a potential match pair with fee deduction awareness.
@@ -509,6 +511,15 @@ class DeterministicMatcher:
             text_score = fuzz.token_ratio(text1_norm, text2_norm) / 100.0
         else:
             text_score = 0.5
+            
+        if not is_ledger and order_id:
+            order_norm = self._normalize_text(order_id)
+            if order_norm and order_norm in text2_norm:
+                text_score = 1.0
+                date_score = 1.0  # Override date penalty for explicit order_id matches
+            elif order_norm and 'ord_' in text2_norm and order_norm not in text2_norm:
+                text_score = 0.0
+                amount_score = 0.0 # Heavy penalty for explicit order_id mismatch
         
         # Weighted total
         total_score = (amount_score * 0.4) + (date_score * 0.3) + (text_score * 0.3)

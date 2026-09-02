@@ -125,12 +125,17 @@ class ReconciliationPipeline:
         
         if not matched_df.empty:
             for _, row in matched_df.iterrows():
-                self.all_matches.append({
+                match = {
                     **row.get('settlement', {}),
                     'match_type': 'exact',
                     'confidence': 1.0,
                     'final_status': 'matched'
-                })
+                }
+                if isinstance(row.get('bank'), dict) and 'txn_id' in row['bank']:
+                    match['bank_txn_id'] = row['bank']['txn_id']
+                if isinstance(row.get('ledger'), dict) and 'order_id' in row['ledger']:
+                    match['ledger_order_id'] = row['ledger']['order_id']
+                self.all_matches.append(match)
         
         print(f"  Exact matches: {len(matched_df)}")
         print(f"  Remaining unmatched: {len(unmatched_sett)} settlements")
@@ -142,12 +147,17 @@ class ReconciliationPipeline:
         
         if not fuzzy_matched.empty:
             for _, row in fuzzy_matched.iterrows():
-                self.all_matches.append({
+                match = {
                     **row.get('settlement', {}),
                     'match_type': row.get('match_type'),
                     'confidence': row.get('confidence'),
                     'final_status': 'matched'
-                })
+                }
+                if isinstance(row.get('bank'), dict) and 'txn_id' in row['bank']:
+                    match['bank_txn_id'] = row['bank']['txn_id']
+                if isinstance(row.get('ledger'), dict) and 'order_id' in row['ledger']:
+                    match['ledger_order_id'] = row['ledger']['order_id']
+                self.all_matches.append(match)
         
         print(f"  Fuzzy matches (high confidence): {len(fuzzy_matched)}")
         print(f"  Low confidence candidates: {len(low_conf)}")
@@ -295,7 +305,7 @@ class ReconciliationPipeline:
         def _extract_id_dict(row: dict) -> dict:
             ids = {}
             direct_keys = [
-                'payment_id', 'order_id', 'settlement_utr', 'utr',
+                'payment_id', 'order_id',
                 'txn_id', 'bank_txn_id', 'entity_id', 'settlement_id'
             ]
             for k in direct_keys:
