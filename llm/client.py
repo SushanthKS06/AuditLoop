@@ -40,7 +40,7 @@ class GroqClient:
     Any response that fails Pydantic validation is rejected (fail-closed).
     """
     
-    DEFAULT_MODEL = "llama-3.3-70b-versatile"
+    DEFAULT_MODEL = "openai/gpt-oss-120b"
     
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         """
@@ -60,7 +60,7 @@ class GroqClient:
                 "Groq API key not found. Set GROQ_API_KEY in .env or environment variables."
             )
         
-        self.client = Groq(api_key=self.api_key)
+        self.client = Groq(api_key=self.api_key, timeout=30.0)
     
     def explain_exception(
         self,
@@ -129,7 +129,8 @@ class GroqClient:
                     tools=[tool_schema],
                     tool_choice={"type": "function", "function": {"name": "explain_exception"}},
                     temperature=0.0,
-                    max_tokens=600
+                    max_tokens=600,
+                    timeout=30.0
                 )
             )
             
@@ -201,7 +202,8 @@ class GroqClient:
                     tools=[tool_schema],
                     tool_choice={"type": "function", "function": {"name": "propose_resolution"}},
                     temperature=0.0,
-                    max_tokens=600
+                    max_tokens=600,
+                    timeout=30.0
                 )
             )
             
@@ -210,7 +212,7 @@ class GroqClient:
         except Exception as e:
             return {"valid": False, "error": str(e)}
             
-    def _execute_with_retry(self, api_callable, max_retries: int = 2):
+    def _execute_with_retry(self, api_callable, max_retries: int = 4):
         """Execute Groq API call with exponential backoff on transient network failures."""
         last_err = None
         for attempt in range(max_retries + 1):
@@ -218,8 +220,12 @@ class GroqClient:
                 return api_callable()
             except Exception as e:
                 last_err = e
+                err_msg = str(e).lower()
                 if attempt < max_retries:
-                    time.sleep(1.0 * (2 ** attempt))
+                    delay = max(2.0, 1.5 * (2 ** attempt))
+                    if "429" in err_msg or "rate limit" in err_msg:
+                        delay = max(delay, 3.0 * (attempt + 1))
+                    time.sleep(delay)
                 else:
                     raise last_err
     
@@ -229,6 +235,7 @@ class GroqClient:
         
         Fail closed - any validation error returns an invalid result.
         """
+        raw_args = None
         try:
             choice = response.choices[0]
             message = choice.message
@@ -242,12 +249,21 @@ class GroqClient:
                 else:
                     input_data = raw_args
             elif message.content:
+                raw_args = message.content
                 input_data = json.loads(message.content)
             else:
                 return {"valid": False, "error": "No tool call or parseable content in response"}
             
             # Validate against Pydantic schema
-            validated = schema_class(**input_data)
+            try:
+                validated = schema_class(**input_data)
+            except Exception as schema_err:
+                # If root_cause enum failed on unexpected string, map to unclassified
+                if schema_class == ExplainExceptionResponse and isinstance(input_data, dict):
+                    input_data['root_cause'] = 'unclassified'
+                    validated = schema_class(**input_data)
+                else:
+                    raise schema_err
             
             return {
                 "valid": True,
@@ -255,7 +271,8 @@ class GroqClient:
             }
             
         except Exception as e:
-            return {"valid": False, "error": f"Validation failed: {str(e)}"}
+            raw_snippet = str(raw_args)[:300] if raw_args is not None else "None"
+            return {"valid": False, "error": f"Validation failed: {str(e)} | Raw payload: {raw_snippet}"}
 
 
 # Backward compatibility aliases

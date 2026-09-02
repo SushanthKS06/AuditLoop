@@ -30,7 +30,7 @@ class ExplainExceptionResponse(BaseModel):
     thought_process: str = Field(
         ...,
         min_length=10,
-        max_length=1000,
+        max_length=2000,
         description="Step-by-step mathematical and temporal deduction before classifying root cause"
     )
     
@@ -47,7 +47,7 @@ class ExplainExceptionResponse(BaseModel):
     explanation: str = Field(
         ..., 
         min_length=10,
-        max_length=500,
+        max_length=2000,
         description="Human-readable explanation of the root cause"
     )
     
@@ -81,7 +81,7 @@ class ProposeResolutionResponse(BaseModel):
     thought_process: str = Field(
         ...,
         min_length=10,
-        max_length=1000,
+        max_length=2000,
         description="Chain-of-thought analysis verifying amount difference, date lag, and reference overlap"
     )
     
@@ -101,7 +101,7 @@ class ProposeResolutionResponse(BaseModel):
     reasoning: str = Field(
         ...,
         min_length=10,
-        max_length=500,
+        max_length=2000,
         description="Justification for the proposed action"
     )
 

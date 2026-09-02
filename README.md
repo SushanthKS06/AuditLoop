@@ -221,6 +221,8 @@ When you see `llm_deterministic_disagreement` cases in the dashboard:
 
 This is the core differentiator: *The LLM can propose, but never commit.*
 
+To guarantee at least one LLM-vs-deterministic disagreement is visible in every demo run (these are rare in a small batch), you can pass `force_disagreement=true` to `/reconcile` (or `--force-disagreement` to `run_pipeline.py`). This injects one fully-labeled synthetic case (`forced_demo_case: true` in its audit record) — it does not affect real exception processing. Set it to `false` to see only organically-discovered disagreements.
+
 ## Reproducibility
 
 ```bash

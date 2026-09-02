@@ -5,6 +5,7 @@ Routes unresolved records to the LLM layer for explanation and resolution propos
 Never commits matches directly - all LLM proposals go through deterministic re-verification.
 """
 
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional
 import threading
@@ -23,10 +24,10 @@ class ExceptionDispatcher:
     Only if both agree does the match get committed.
     """
     
-    def __init__(self, llm_client=None, max_workers: int = 5):
+    def __init__(self, llm_client=None, max_workers: int = 2):
         """
         Args:
-            llm_client: Claude API client instance
+            llm_client: Claude/Groq API client instance
             max_workers: ThreadPoolExecutor concurrency for parallel exception processing
         """
         self.llm_client = llm_client
@@ -63,6 +64,9 @@ class ExceptionDispatcher:
         forced_idx = len(exceptions) // 2 if force_disagreement_case else -1
         
         def _worker(idx: int, exc: Dict) -> tuple:
+            # Stagger dispatches slightly to avoid sudden burst rate-limits
+            if idx > 0 and self.llm_client:
+                time.sleep(0.3 * (idx % self.max_workers))
             if idx == forced_idx:
                 res = self._simulate_disagreement_case(exc)
             else:
@@ -97,7 +101,8 @@ class ExceptionDispatcher:
                             'rule_fired': result.get('llm_root_cause', 'unclassified'),
                             'confidence': result.get('llm_confidence', 0),
                             'decision': result.get('final_status', 'unresolved_exception'),
-                            'llm_reasoning': result.get('llm_explanation', '')
+                            'llm_reasoning': result.get('llm_explanation') or result.get('llm_error_detail', '') or '',
+                            'llm_error_detail': result.get('llm_error_detail')
                         })
         
         return processed
@@ -113,6 +118,7 @@ class ExceptionDispatcher:
             'llm_proposed_action': None,
             'llm_proposal_reasoning': None,
             'deterministic_recheck_passed': None,
+            'llm_error_detail': None,
             'final_status': 'unresolved_exception'
         }
         
@@ -129,6 +135,7 @@ class ExceptionDispatcher:
             
             if not explanation_result or not explanation_result.get('valid'):
                 result['final_status'] = 'llm_parse_error'
+                result['llm_error_detail'] = explanation_result.get('error', 'Unknown explanation error') if explanation_result else 'Null explanation result'
                 return result
             
             result['llm_invoked'] = True
@@ -167,6 +174,7 @@ class ExceptionDispatcher:
                         result['final_status'] = 'unresolved_exception'
                 else:
                     result['final_status'] = 'llm_parse_error'
+                    result['llm_error_detail'] = proposal_result.get('error', 'Unknown proposal error') if proposal_result else 'Null proposal result'
             else:
                 # No counterpart to compare - can only explain, not resolve
                 if explanation_result.get('confidence', 0) >= 0.8:
@@ -175,7 +183,8 @@ class ExceptionDispatcher:
                     result['final_status'] = 'unresolved_exception'
         
         except Exception as e:
-            result['final_status'] = f'llm_error: {str(e)}'
+            result['final_status'] = 'llm_parse_error'
+            result['llm_error_detail'] = str(e)
         
         return result
     

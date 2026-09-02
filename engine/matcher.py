@@ -519,10 +519,16 @@ class DeterministicMatcher:
         # Low-confidence matches
         if not low_confidence.empty:
             for _, row in low_confidence.iterrows():
+                sett = row.get('settlement', {}) or {}
+                count = row.get('bank') or row.get('ledger') or {}
+                sett_id = str(sett.get('entity_id') or sett.get('payment_id') or sett.get('settlement_id') or '')
+                count_id = str(count.get('txn_id') or count.get('order_id') or count.get('ledger_id') or count.get('reference') or count.get('utr') or '')
+                rec_id = f"{sett_id}-{count_id}" if sett_id and count_id else (sett_id or count_id)
                 exceptions.append({
                     'type': 'low_confidence',
-                    'settlement': row.get('settlement', {}),
-                    'counterpart': row.get('bank') or row.get('ledger'),
+                    'record_ids': rec_id,
+                    'settlement': sett,
+                    'counterpart': count,
                     'confidence': row.get('confidence', 0),
                     'rule_fired': row.get('rule_fired', '')
                 })
@@ -530,9 +536,11 @@ class DeterministicMatcher:
         # Unmatched settlements
         if not unmatched_settlements.empty:
             for _, row in unmatched_settlements.iterrows():
+                r = row.to_dict()
                 exceptions.append({
                     'type': 'unmatched_settlement',
-                    'settlement': row.to_dict(),
+                    'record_ids': str(r.get('entity_id') or r.get('payment_id') or r.get('settlement_id') or ''),
+                    'settlement': r,
                     'counterpart': None,
                     'confidence': 0.0,
                     'rule_fired': 'no_candidate_found'
@@ -541,10 +549,12 @@ class DeterministicMatcher:
         # Unmatched bank transactions
         if not unmatched_bank.empty:
             for _, row in unmatched_bank.iterrows():
+                r = row.to_dict()
                 exceptions.append({
                     'type': 'unmatched_bank',
+                    'record_ids': str(r.get('txn_id') or r.get('utr') or ''),
                     'settlement': None,
-                    'counterpart': row.to_dict(),
+                    'counterpart': r,
                     'confidence': 0.0,
                     'rule_fired': 'no_candidate_found'
                 })
@@ -552,10 +562,12 @@ class DeterministicMatcher:
         # Unmatched ledger entries
         if not unmatched_ledger.empty:
             for _, row in unmatched_ledger.iterrows():
+                r = row.to_dict()
                 exceptions.append({
                     'type': 'unmatched_ledger',
+                    'record_ids': str(r.get('ledger_id') or r.get('reference') or ''),
                     'settlement': None,
-                    'counterpart': row.to_dict(),
+                    'counterpart': r,
                     'confidence': 0.0,
                     'rule_fired': 'no_candidate_found'
                 })

@@ -126,6 +126,26 @@ def main():
             metrics.get('unresolved_count', 0)
         )
     
+    # Expandable raw ground truth metrics breakdown
+    with st.expander("Ground-Truth & Secondary Metrics Breakdown", expanded=False):
+        fp = metrics.get('false_positives', 0)
+        tn = metrics.get('true_negatives', 0)
+        tp = metrics.get('true_positives', 0)
+        fn = metrics.get('false_negatives', 0)
+        
+        m_c1, m_c2, m_c3, m_c4 = st.columns(4)
+        with m_c1:
+            st.metric("True Positives (TP)", tp)
+        with m_c2:
+            st.metric("False Positives (FP)", fp)
+        with m_c3:
+            st.metric("True Negatives (TN)", tn)
+        with m_c4:
+            st.metric("False Negatives (FN)", fn)
+            
+        neg_count = tn + fp
+        st.caption(f"False Positive Rate: {metrics.get('false_positive_rate', 0)*100:.1f}% — Computed on {neg_count} known-negative ground-truth cases (treat as directional, not statistically robust).")
+    
     st.divider()
     
     # Main content tabs
@@ -139,7 +159,7 @@ def main():
             flat_results = []
             for r in results:
                 flat = {
-                    'payment_id': r.get('payment_id', ''),
+                    'payment_id': r.get('payment_id', '') or r.get('record_ids', ''),
                     'status': r.get('final_status', ''),
                     'type': r.get('type', ''),
                     'confidence': r.get('confidence', 0),
@@ -149,6 +169,14 @@ def main():
             
             df = pd.DataFrame(flat_results)
             st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            csv_data = df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "📥 Download All_Results.csv",
+                data=csv_data,
+                file_name="All_Results.csv",
+                mime="text/csv"
+            )
         else:
             st.info("No results loaded. Run the reconciliation pipeline first.")
     
@@ -176,6 +204,8 @@ def main():
             
             if selected is not None:
                 exc = exceptions[selected]
+                if exc.get('forced_demo_case'):
+                    st.caption("⚠️ Seeded demo case — guaranteed for presentation purposes, not organically discovered.")
                 st.json(exc)
                 
                 st.markdown("#### Human-in-the-Loop Maker-Checker Action")
@@ -224,6 +254,8 @@ def main():
         if disagreements:
             for i, d in enumerate(disagreements):
                 with st.expander(f"Disagreement Case #{i+1}: {d.get('record_ids', 'Unknown')}"):
+                    if d.get('forced_demo_case'):
+                        st.caption("⚠️ Seeded demo case — guaranteed for presentation purposes, not organically discovered.")
                     st.write("**Record IDs:**", d.get('record_ids', ''))
                     st.write("**Stage:**", d.get('stage', ''))
                     st.write("**Rule Fired:**", d.get('rule_fired', ''))
@@ -272,6 +304,14 @@ def main():
             display_cols = ['id', 'timestamp', 'record_ids', 'stage', 'decision', 'previous_hash', 'record_hash']
             available_cols = [c for c in display_cols if c in chain_df.columns]
             st.dataframe(chain_df[available_cols], use_container_width=True, hide_index=True)
+            
+            chain_csv = chain_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "📥 Download Audit_Hash_Chain.csv",
+                data=chain_csv,
+                file_name="Audit_Hash_Chain.csv",
+                mime="text/csv"
+            )
         else:
             st.info("Audit log is currently empty.")
     

@@ -68,7 +68,8 @@
 
 > *"Now, let's look at what sets AuditLoop apart: **Failure Recovery**.
 > 
-> In the Disagreements tab, we see Case #1. Claude analyzed an anomaly and proposed a match. 
+> In the Disagreements tab, we see Case #1. (Note: In this live demo run, this specific disagreement is a seeded demo case to guarantee a visible conflict in a small batch, while all other exceptions are organically discovered). 
+> The LLM analyzed an anomaly and proposed a match. 
 > But our deterministic re-verifier caught an unexplainable amount difference exceeding our threshold. 
 > Instead of silently moving money, AuditLoop flagged it as an `llm_deterministic_disagreement`. 
 > 
