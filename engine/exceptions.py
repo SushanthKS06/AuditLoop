@@ -27,7 +27,7 @@ class ExceptionDispatcher:
     def __init__(self, llm_client=None, max_workers: int = 2):
         """
         Args:
-            llm_client: Claude/Groq API client instance
+            llm_client: Groq API client instance
             max_workers: ThreadPoolExecutor concurrency for parallel exception processing
         """
         self.llm_client = llm_client

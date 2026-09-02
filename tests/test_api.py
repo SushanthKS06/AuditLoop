@@ -12,12 +12,22 @@ from api.app import app
 @pytest.fixture
 def client():
     """FastAPI TestClient fixture."""
-    return TestClient(app)
+    return TestClient(app, headers={"X-API-Key": "dev-secret-key"})
 
 
 class TestApiEndpoints:
     """Test suite for AuditLoop REST API."""
     
+    def test_unauthorized_access(self):
+        """Test that missing or invalid API key returns 401 or 403."""
+        unauth_client = TestClient(app)
+        response = unauth_client.get("/health")
+        assert response.status_code == 401
+        
+        invalid_client = TestClient(app, headers={"X-API-Key": "wrong-key"})
+        response = invalid_client.get("/health")
+        assert response.status_code == 403
+
     def test_health_endpoint(self, client):
         """Test GET /health returns 200 with healthy status."""
         response = client.get("/health")
@@ -43,6 +53,16 @@ class TestApiEndpoints:
         assert "metrics" in data
         assert "audit_summary" in data
         assert data["audit_log_count"] > 0
+        
+    def test_reconcile_path_traversal_rejection(self, client):
+        """Test that POST /reconcile rejects path traversal attempts."""
+        payload = {
+            "settlements_path": "../../secrets/passwords.txt"
+        }
+        response = client.post("/reconcile", json=payload)
+        assert response.status_code == 400
+        data = response.json()
+        assert "Path traversal detected" in data["detail"] or "Filename" in data["detail"] or "Path must resolve" in data["detail"]
     
     def test_metrics_endpoint(self, client):
         """Test GET /metrics returns the computed metrics report."""

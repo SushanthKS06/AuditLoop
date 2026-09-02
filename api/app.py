@@ -5,7 +5,9 @@ Provides endpoints for programmatic reconciliation runs, metrics evaluation,
 and real-time inspection of the append-only audit trail.
 """
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends, Security
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Dict, Any, List
 import os
@@ -27,6 +29,33 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# CORS configuration
+origins = [
+    "http://localhost:8501",
+    "http://127.0.0.1:8501",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# API Key Authentication
+API_KEY_NAME = "X-API-Key"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=True)
+
+async def get_api_key(api_key: str = Security(api_key_header)):
+    expected_key = os.getenv("API_SECRET_KEY", "dev-secret-key")
+    if api_key != expected_key:
+        raise HTTPException(
+            status_code=403,
+            detail="Could not validate API KEY"
+        )
+    return api_key
+
 
 class ReconcileRequest(BaseModel):
     """Request model for triggering reconciliation."""
@@ -45,7 +74,7 @@ class ReconcileRequest(BaseModel):
     seed: int = Field(42, description="Random seed for deterministic reproducibility")
     messiness: float = Field(0.25, ge=0.0, le=1.0, description="Injected anomaly/messiness ratio")
     force_disagreement: bool = Field(False, description="Ensure at least one disagreement case exists for failure-recovery validation")
-    use_llm: bool = Field(True, description="Enable Claude LLM for Stage 3 exception explanation and resolution proposals")
+    use_llm: bool = Field(True, description="Enable LLM for Stage 3 exception explanation and resolution proposals")
     settlements_path: str = Field("data/settlements_live.csv", description="Path to Razorpay settlements CSV")
     bank_path: str = Field("data/bank_statement.csv", description="Path to bank statement CSV")
     ledger_path: str = Field("data/internal_ledger.csv", description="Path to internal ledger CSV")
@@ -72,7 +101,7 @@ class HealthResponse(BaseModel):
     audit_store: str = "sqlite_wal"
 
 
-@app.get("/health", response_model=HealthResponse)
+@app.get("/health", response_model=HealthResponse, dependencies=[Depends(get_api_key)])
 async def health_check():
     """
     Health check endpoint.
@@ -85,7 +114,7 @@ async def health_check():
     )
 
 
-@app.post("/reconcile", response_model=ReconcileResponse)
+@app.post("/reconcile", response_model=ReconcileResponse, dependencies=[Depends(get_api_key)])
 def run_reconciliation(request: ReconcileRequest):
     """
     Run the full end-to-end reconciliation pipeline.
@@ -135,6 +164,8 @@ def run_reconciliation(request: ReconcileRequest):
         
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -144,7 +175,7 @@ def run_reconciliation(request: ReconcileRequest):
         )
 
 
-@app.get("/audit/verify", response_model=Dict[str, Any])
+@app.get("/audit/verify", response_model=Dict[str, Any], dependencies=[Depends(get_api_key)])
 def verify_audit_integrity():
     """
     Cryptographically verify the entire append-only audit trail.
@@ -156,7 +187,7 @@ def verify_audit_integrity():
     return store.verify_integrity()
 
 
-@app.get("/metrics", response_model=Dict[str, Any])
+@app.get("/metrics", response_model=Dict[str, Any], dependencies=[Depends(get_api_key)])
 async def get_latest_metrics():
     """
     Get latest reconciliation metrics from the most recent run.
@@ -180,7 +211,7 @@ async def get_latest_metrics():
     )
 
 
-@app.get("/audit/recent", response_model=List[Dict[str, Any]])
+@app.get("/audit/recent", response_model=List[Dict[str, Any]], dependencies=[Depends(get_api_key)])
 async def get_recent_audit_entries(
     limit: int = Query(20, ge=1, le=500, description="Maximum entries to return"),
     status: Optional[str] = Query(None, description="Filter by final status (e.g. matched, llm_deterministic_disagreement)")
@@ -198,7 +229,7 @@ async def get_recent_audit_entries(
     return store.get_recent(limit=limit)
 
 
-@app.get("/audit/disagreements", response_model=List[Dict[str, Any]])
+@app.get("/audit/disagreements", response_model=List[Dict[str, Any]], dependencies=[Depends(get_api_key)])
 async def get_disagreements():
     """
     Get all cases where the LLM proposal conflicted with deterministic re-verification.
@@ -208,7 +239,7 @@ async def get_disagreements():
     return store.get_disagreements()
 
 
-@app.get("/audit/exceptions", response_model=List[Dict[str, Any]])
+@app.get("/audit/exceptions", response_model=List[Dict[str, Any]], dependencies=[Depends(get_api_key)])
 async def get_unresolved_exceptions():
     """
     Get all unresolved exceptions requiring human reviewer inspection.
@@ -217,7 +248,7 @@ async def get_unresolved_exceptions():
     return store.get_exceptions()
 
 
-@app.get("/audit/summary", response_model=Dict[str, Any])
+@app.get("/audit/summary", response_model=Dict[str, Any], dependencies=[Depends(get_api_key)])
 async def get_audit_summary():
     """
     Get high-level throughput and confidence summary statistics from the audit log.
@@ -226,7 +257,7 @@ async def get_audit_summary():
     return store.get_summary_stats()
 
 
-@app.post("/audit/resolve", response_model=HumanResolutionResponse)
+@app.post("/audit/resolve", response_model=HumanResolutionResponse, dependencies=[Depends(get_api_key)])
 def resolve_audit_exception(request: HumanResolutionRequest):
     """
     Human-in-the-Loop Maker-Checker endpoint.
@@ -243,7 +274,7 @@ def resolve_audit_exception(request: HumanResolutionRequest):
     return HumanResolutionResponse(**result)
 
 
-@app.get("/audit/history", response_model=List[Dict[str, Any]])
+@app.get("/audit/history", response_model=List[Dict[str, Any]], dependencies=[Depends(get_api_key)])
 async def get_record_audit_history(
     record_ids: str = Query(..., description="Target record_ids pair to inspect full history for")
 ):

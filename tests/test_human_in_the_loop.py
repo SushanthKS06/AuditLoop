@@ -82,7 +82,7 @@ class TestHumanResolutionApi:
     """Test REST API endpoint for human resolution."""
     
     def setup_method(self):
-        self.client = TestClient(app)
+        self.client = TestClient(app, headers={"X-API-Key": "dev-secret-key"})
         
     def test_api_resolve_endpoint(self):
         payload = {

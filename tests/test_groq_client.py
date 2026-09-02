@@ -29,7 +29,6 @@ class TestGroqClientInitialization:
     def test_init_missing_key_raises(self, monkeypatch):
         """Client raises ValueError when no API key is provided or found in environment."""
         monkeypatch.delenv("GROQ_API_KEY", raising=False)
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         
         with pytest.raises(ValueError, match="Groq API key not found"):
             GroqClient(api_key=None)
@@ -37,7 +36,6 @@ class TestGroqClientInitialization:
     def test_create_client_factory_none_when_no_key(self, monkeypatch):
         """create_client returns None gracefully if no API key is set."""
         monkeypatch.delenv("GROQ_API_KEY", raising=False)
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         client = create_client()
         assert client is None
 

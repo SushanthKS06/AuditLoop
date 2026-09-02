@@ -13,7 +13,7 @@
 | :--- | :--- | :--- | :--- |
 | **0:00 - 0:45** | **The Industry Problem** | Split screen: Razorpay Recon CSV, Bank statement, ERP ledger | Reconciliation is an unmitigated nightmare of timing lags and MDR fee deductions. |
 | **0:45 - 1:30** | **The Architectural Thesis** | Architecture diagram | *The LLM proposes; deterministic verifier disposes.* Never trust an LLM with money. |
-| **1:30 - 3:00** | **Live Pipeline Demo** | Streamlit Dashboard & Terminal | Stage 1 ($O(N+M)$ hash match), Stage 2 (fuzzy fee scoring), Stage 3 (Claude CoT + PII sanitization). |
+| **1:30 - 3:00** | **Live Pipeline Demo** | Streamlit Dashboard & Terminal | Stage 1 ($O(N+M)$ hash match), Stage 2 (fuzzy fee scoring), Stage 3 (Groq LLaMA 3.3 CoT + PII sanitization). |
 | **3:00 - 3:45** | **Failure Recovery & Disagreements** | Disagreements Tab & HITL Form | Fail-closed demonstration: LLM hallucination caught and stopped cold. Maker-checker human sign-off. |
 | **3:45 - 4:30** | **Cryptographic Auditability & Metrics** | `/audit/verify` API & SHA-256 Tab | Mathematical tamper-evidence with SHA-256 block hashing; ground truth metrics ($>90\%$ precision). |
 | **4:30 - 5:00** | **Enterprise Scale & Closing** | API Docs & Terminal benchmarks | 10,000 txns/sec, 92% token cost reduction, SOC2/RBI audit-ready. |
@@ -44,7 +44,7 @@
 > We engineered a 3-stage pipeline:
 > - **Stage 1**: Vectorized exact hash-join on normalized UTRs, order IDs, and payment IDs in $O(N+M)$ time.
 > - **Stage 2**: Deterministic fuzzy matching with MDR fee deduction awareness and date proximity scoring.
-> - **Stage 3**: For remaining unresolved exceptions, Claude analyzes the root cause with step-by-step Chain-of-Thought and PII redaction.
+> - **Stage 3**: For remaining unresolved exceptions, LLaMA 3.3 analyzes the root cause with step-by-step Chain-of-Thought and PII redaction.
 > 
 > If the LLM proposes an action, our deterministic engine intercepts it and re-verifies the mathematics before committing. If there is any discrepancy, we fail closed."*
 
@@ -68,7 +68,8 @@
 
 > *"Now, let's look at what sets AuditLoop apart: **Failure Recovery**.
 > 
-> In the Disagreements tab, we see Case #1. (Note: In this live demo run, this specific disagreement is a seeded demo case to guarantee a visible conflict in a small batch, while all other exceptions are organically discovered). 
+> In the Disagreements tab, we see Case #1. 
+> *(Presenter Note: Make sure to explicitly call out to the audience that this specific disagreement is a fabricated 🚨 FORCED DEMO CASE injected into the run to guarantee a visible conflict for the demo, while all other exceptions are organically discovered.)*
 > The LLM analyzed an anomaly and proposed a match. 
 > But our deterministic re-verifier caught an unexplainable amount difference exceeding our threshold. 
 > Instead of silently moving money, AuditLoop flagged it as an `llm_deterministic_disagreement`. 
@@ -104,7 +105,7 @@
 
 ## 🎯 Anticipated Judge & Panel Q&A Playbook
 
-### Q1: "What happens if Anthropic's Claude API goes down during a batch run?"
+### Q1: "What happens if Groq's API goes down during a batch run?"
 > **Answer:** *"AuditLoop fails closed gracefully. If the LLM API times out or throws a 500/429 error, exceptions are immediately tagged as `unresolved_exception` or `llm_unavailable` and queued for reviewer inspection. Stage 1 and Stage 2 deterministic matches are completely unaffected and continue executing at wire speed."*
 
 ### Q2: "How do you protect sensitive customer PII from leaking into the LLM?"

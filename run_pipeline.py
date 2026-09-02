@@ -71,6 +71,24 @@ class ReconciliationPipeline:
         """Callback for writing audit records."""
         self.audit_store.append(record)
     
+    def _validate_path(self, path: str, allowed_names: set) -> None:
+        """Validate input paths to prevent path traversal and arbitrary file reads."""
+        if not path:
+            return
+            
+        if ".." in path:
+            raise ValueError(f"Path traversal detected: {path}")
+            
+        basename = os.path.basename(path)
+        if basename not in allowed_names:
+            raise ValueError(f"Filename '{basename}' is not in the allowed whitelist: {allowed_names}")
+            
+        real_path = os.path.realpath(path)
+        # Check if the resolved path is inside the project's data directory
+        data_dir = os.path.realpath("data")
+        if not real_path.startswith(data_dir):
+            raise ValueError(f"Path must resolve to inside the data/ directory: {path}")
+
     def run(
         self,
         settlements_path: str = "data/settlements_live.csv",
@@ -98,6 +116,18 @@ class ReconciliationPipeline:
         print("AUDITLOOP RECONCILIATION PIPELINE")
         print("="*60)
         
+        if self.force_disagreement_demo:
+            print("\n🚨 WARNING: FORCED DEMO CASE ENABLED 🚨")
+            print("This run includes at least one fabricated discrepancy to demonstrate")
+            print("the LLM-vs-Deterministic conflict resolution UI.")
+            print("="*60)
+        
+        # Validate paths before processing
+        allowed_files = {"settlements_live.csv", "bank_statement.csv", "internal_ledger.csv"}
+        self._validate_path(settlements_path, allowed_files)
+        self._validate_path(bank_path, allowed_files)
+        self._validate_path(ledger_path, allowed_files)
+
         # Step 0: Load or generate data
         print("\n[Step 0] Loading data...")
         settlements_df, bank_df, ledger_df = self._load_or_generate_data(
@@ -444,9 +474,10 @@ class ReconciliationPipeline:
                     print(f"  Fetched {len(settlements_df)} settlements from Razorpay API")
                 else:
                     print("  API returned no settlements - will use synthetic data")
-            except ValueError as e:
-                print(f"  API unavailable: {e}")
+            except Exception as e:
+                print(f"  API unavailable or failed: {e}")
                 print("  Generating linked synthetic dataset")
+                settlements_df = None
         
         # If files are missing or row count does not match requested batch size, generate fresh synchronized datasets
         needs_generation = (
@@ -459,7 +490,7 @@ class ReconciliationPipeline:
         )
         
         if needs_generation:
-            generator = SyntheticDataGenerator(seed=seed, messiness_ratio=0.25)
+            generator = SyntheticDataGenerator(seed=seed, messiness_ratio=0.40)
             bank_df, ledger_df, _ = generator.generate(
                 num_records=num_records,
                 settlements_df=settlements_df if settlements_df is not None and len(settlements_df) == num_records else None,

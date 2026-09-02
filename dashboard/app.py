@@ -281,9 +281,12 @@ def main():
         
         if disagreements:
             for i, d in enumerate(disagreements):
-                with st.expander(f"Disagreement Case #{i+1}: {d.get('record_ids', 'Unknown')}"):
+                title = f"Disagreement Case #{i+1}: {d.get('record_ids', 'Unknown')}"
+                if d.get('forced_demo_case'):
+                    title += " 🚨 FORCED DEMO CASE"
+                with st.expander(title):
                     if d.get('forced_demo_case'):
-                        st.caption("⚠️ Seeded demo case — guaranteed for presentation purposes, not organically discovered.")
+                        st.error("🚨 FORCED DEMO CASE: This is a fabricated discrepancy guaranteed for presentation purposes.")
                     st.write("**Record IDs:**", d.get('record_ids', ''))
                     st.write("**Stage:**", d.get('stage', ''))
                     st.write("**Rule Fired:**", d.get('rule_fired', ''))

@@ -32,3 +32,9 @@ Thumbs.db
 *.db-journal
 *.db-wal
 *.db-shm
+audit_trail.db
+
+# Generated Artifacts
+metrics_report.json
+metrics/metrics_report.json
+results.json

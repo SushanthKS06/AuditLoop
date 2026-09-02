@@ -9,7 +9,7 @@ All notable changes to AuditLoop are documented in this file. The format is base
 - Deterministic matching engine with two-stage pipeline:
   - Stage 1: Exact match on normalized amount/date/reference fields
   - Stage 2: Fuzzy match with configurable confidence threshold using RapidFuzz
-- LLM exception handling layer (Anthropic Claude API):
+- LLM exception handling layer (Groq API):
   - `explain_exception` tool with enum-constrained root cause classification
   - `propose_resolution` tool with strict Pydantic schema validation
   - **Critical safety**: Deterministic re-verification of all LLM-proposed matches
@@ -50,7 +50,7 @@ All notable changes to AuditLoop are documented in this file. The format is base
 ### Technical Stack
 - Python 3.11+
 - FastAPI, pandas, RapidFuzz
-- Anthropic Claude SDK (tool calling + Pydantic schemas)
+- Groq SDK (tool calling + Pydantic schemas)
 - Razorpay API (test-mode Settlement Recon)
 - SQLite (audit log)
 - Faker (synthetic data)

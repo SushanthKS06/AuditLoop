@@ -40,7 +40,7 @@ class GroqClient:
     Any response that fails Pydantic validation is rejected (fail-closed).
     """
     
-    DEFAULT_MODEL = "openai/gpt-oss-120b"
+    DEFAULT_MODEL = "llama-3.3-70b-versatile"
     
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         """
@@ -48,7 +48,7 @@ class GroqClient:
             api_key: Groq API key (defaults to GROQ_API_KEY env var)
             model: Model to use (defaults to GROQ_MODEL env var or llama-3.3-70b-versatile)
         """
-        self.api_key = api_key or os.getenv("GROQ_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+        self.api_key = api_key or os.getenv("GROQ_API_KEY")
         self.model = model or os.getenv("GROQ_MODEL") or self.DEFAULT_MODEL
         self.client = None
         
@@ -276,7 +276,6 @@ class GroqClient:
 
 
 # Backward compatibility aliases
-ClaudeClient = GroqClient
 LLMClient = GroqClient
 
 

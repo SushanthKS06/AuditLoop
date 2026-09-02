@@ -208,6 +208,8 @@ scored. Records without a ground-truth entry are excluded and counted as
 `unverified_count`. The dashboard always displays `ground_truth_coverage` next
 to the metrics so this number is never silently assumed.
 
+*Note: The ground truth and test data share the same generator. The pipeline intentionally uses a high `messiness_ratio` parameter (0.40) to inject genuine ambiguities and edge cases into the batch, making the resulting precision and recall scores meaningful rather than trivially perfect.*
+
 | Metric | What It Means | Target |
 |--------|---------------|--------|
 | **Match Rate** | % of records successfully reconciled | >80% |
