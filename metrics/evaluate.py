@@ -5,21 +5,35 @@ Computes precision, recall, match rate, and false-positive rate
 against ground_truth.json.
 
 Run automatically - never hand-pick metrics.
+
+Coverage modes
+--------------
+"strict" (default):
+    Only records that have a matching ground-truth entry are scored.
+    Records with no ground-truth entry are excluded from every metric
+    and counted separately as ``unverified_count``.  This is the only
+    mode that should appear in dashboards or submission screenshots.
+
+"assumed":
+    Legacy behaviour — records without a ground-truth entry fall back
+    to a heuristic (orphan/unmatched → should_match=False, else True).
+    Kept for internal debugging only.  Output keys are prefixed
+    ``assumed_`` so they are never confused with verified numbers.
 """
 
 import json
 import os
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Literal
 
 
 class MetricsEvaluator:
     """
     Evaluate reconciliation results against ground truth.
-    
-    WHY: Judges explicitly penalize "cherry-picked demos." 
+
+    WHY: Judges explicitly penalize "cherry-picked demos."
     We compute metrics against a known answer key and report them openly.
     """
-    
+
     def __init__(self, ground_truth_path: str = "data/ground_truth.json"):
         """
         Args:
@@ -27,42 +41,56 @@ class MetricsEvaluator:
         """
         self.ground_truth_path = ground_truth_path
         self.ground_truth = self._load_ground_truth()
-    
+
     def _load_ground_truth(self) -> List[Dict]:
         """Load ground truth from JSON file."""
         if not os.path.exists(self.ground_truth_path):
             return []
-        
+
         try:
             with open(self.ground_truth_path, 'r') as f:
                 return json.load(f)
         except Exception:
             return []
-    
+
     def evaluate(
         self,
         results: List[Dict],
-        output_path: Optional[str] = "metrics/metrics_report.json"
+        output_path: Optional[str] = "metrics/metrics_report.json",
+        coverage_mode: Literal["strict", "assumed"] = "strict"
     ) -> Dict[str, Any]:
         """
         Evaluate reconciliation results against ground truth.
-        
+
         Args:
             results: List of result records with final_status
             output_path: Path to write metrics report
-            
+            coverage_mode:
+                "strict"  — Only score records with a real ground-truth entry.
+                            Unlabeled records are excluded from all metrics and
+                            counted in ``unverified_count``.  **This is the
+                            default and must be used for any public-facing
+                            metric.**
+                "assumed" — Legacy fallback behaviour.  Records without a
+                            ground-truth entry are scored via heuristic.
+                            Output contains ``assumed_`` keys to prevent
+                            confusion with verified numbers.
+
         Returns:
-            Dictionary with computed metrics
+            Dictionary with computed metrics.  Always includes:
+                ground_truth_coverage  — fraction of records that had a GT entry
+                unverified_count       — records excluded in strict mode
+                coverage_mode          — the mode that was used
         """
         # Always reload ground truth to reflect latest run
         self.ground_truth = self._load_ground_truth()
-        
+
         # Build lookup maps by payment_id, order_id, utr, and bank_txn_id
-        gt_by_payment = {}
-        gt_by_order = {}
-        gt_by_utr = {}
-        gt_by_bank_txn = {}
-        
+        gt_by_payment: Dict[str, Dict] = {}
+        gt_by_order: Dict[str, Dict] = {}
+        gt_by_utr: Dict[str, Dict] = {}
+        gt_by_bank_txn: Dict[str, Dict] = {}
+
         for gt in self.ground_truth:
             if gt.get('payment_id'):
                 gt_by_payment[str(gt['payment_id']).lower()] = gt
@@ -72,77 +100,144 @@ class MetricsEvaluator:
                 gt_by_utr[str(gt['utr']).lower()] = gt
             if gt.get('bank_txn_id'):
                 gt_by_bank_txn[str(gt['bank_txn_id']).lower()] = gt
-        
+
         # Classify results
-        true_positives = 0  # Correctly matched
-        false_positives = 0  # Incorrectly matched (shouldn't have matched)
-        true_negatives = 0  # Correctly flagged as exception
-        false_negatives = 0  # Should have matched but didn't
-        
+        true_positives = 0   # Correctly matched (verified)
+        false_positives = 0  # Incorrectly matched — shouldn't have matched (verified)
+        true_negatives = 0   # Correctly flagged as exception (verified)
+        false_negatives = 0  # Should have matched but didn't (verified)
+
+        # "assumed" mode accumulators — kept separate so they never pollute
+        # the verified counts
+        assumed_true_positives = 0
+        assumed_true_negatives = 0
+
         matched_count = 0
         exception_count = 0
         disagreement_count = 0
         unresolved_count = 0
-        
+        unverified_count = 0   # Records with no GT entry (strict mode skips these)
+
         for result in results:
             final_status = result.get('final_status', '')
             is_matched = final_status in ['matched', 'matched_llm_verified']
-            
+
             # Find matching ground truth entry
-            gt = self._find_ground_truth(result, gt_by_payment, gt_by_order, gt_by_utr, gt_by_bank_txn)
-            
+            gt = self._find_ground_truth(
+                result, gt_by_payment, gt_by_order, gt_by_utr, gt_by_bank_txn
+            )
+
             if gt:
+                # ── Ground-truth-verified record ──────────────────────────
                 should_match = gt.get('should_match', True)
+
+                if is_matched:
+                    matched_count += 1
+                    if should_match:
+                        true_positives += 1
+                    else:
+                        false_positives += 1
+                else:
+                    exception_count += 1
+                    if not should_match:
+                        true_negatives += 1
+                    else:
+                        false_negatives += 1
+
             else:
-                # If record is an unmatched exception or orphan type, should_match is False
-                res_type = result.get('type', '')
-                if 'orphan' in res_type or 'unmatched' in res_type or result.get('counterpart') is None:
-                    should_match = False
+                # ── No ground-truth entry found ───────────────────────────
+                if coverage_mode == "strict":
+                    # Exclude from all metrics; just count and continue.
+                    unverified_count += 1
+                    # Still track raw match/exception for informational totals.
+                    if is_matched:
+                        matched_count += 1
+                    else:
+                        exception_count += 1
                 else:
-                    should_match = True
-            
-            if is_matched:
-                matched_count += 1
-                if should_match:
-                    true_positives += 1
-                else:
-                    false_positives += 1
-            else:
-                exception_count += 1
-                if not should_match:
-                    true_negatives += 1
-                else:
-                    false_negatives += 1
-            
+                    # "assumed" mode — legacy heuristic, clearly labelled.
+                    res_type = result.get('type', '')
+                    if (
+                        'orphan' in res_type
+                        or 'unmatched' in res_type
+                        or result.get('counterpart') is None
+                    ):
+                        assumed_should_match = False
+                    else:
+                        assumed_should_match = True
+
+                    if is_matched:
+                        matched_count += 1
+                        if assumed_should_match:
+                            assumed_true_positives += 1
+                            true_positives += 1
+                        else:
+                            false_positives += 1
+                    else:
+                        exception_count += 1
+                        if not assumed_should_match:
+                            assumed_true_negatives += 1
+                            true_negatives += 1
+                        else:
+                            false_negatives += 1
+
             if final_status == 'llm_deterministic_disagreement':
                 disagreement_count += 1
-            
-            if final_status in ['unresolved_exception', 'llm_error', 'low_confidence', 'llm_unavailable']:
+
+            if final_status in [
+                'unresolved_exception', 'llm_error',
+                'low_confidence', 'llm_unavailable'
+            ]:
                 unresolved_count += 1
-        
+
         total_recs = len(results)
-        
-        # Compute precision, recall, F1
-        precision = true_positives / (true_positives + false_positives) \
-            if (true_positives + false_positives) > 0 else (1.0 if total_recs > 0 and false_positives == 0 else 0.0)
-        
-        recall = true_positives / (true_positives + false_negatives) \
-            if (true_positives + false_negatives) > 0 else 0.0
-        
+        # Number of records that were actually scored against ground truth
+        scored_count = total_recs - unverified_count
+
+        # ── Precision / Recall / F1 (computed on verified records only) ──
+        precision = (
+            true_positives / (true_positives + false_positives)
+            if (true_positives + false_positives) > 0
+            else (1.0 if scored_count > 0 and false_positives == 0 else 0.0)
+        )
+
+        recall = (
+            true_positives / (true_positives + false_negatives)
+            if (true_positives + false_negatives) > 0
+            else 0.0
+        )
+
         match_rate = matched_count / total_recs if total_recs > 0 else 0.0
-        
-        false_positive_rate = false_positives / (false_positives + true_negatives) \
-            if (false_positives + true_negatives) > 0 else 0.0
-        
-        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
-        
-        metrics = {
+
+        false_positive_rate = (
+            false_positives / (false_positives + true_negatives)
+            if (false_positives + true_negatives) > 0
+            else 0.0
+        )
+
+        f1 = (
+            (2 * precision * recall / (precision + recall))
+            if (precision + recall) > 0
+            else 0.0
+        )
+
+        ground_truth_coverage = (
+            round(scored_count / total_recs, 4) if total_recs > 0 else 0.0
+        )
+
+        metrics: Dict[str, Any] = {
+            # ── Core counts ──────────────────────────────────────────────
             'total_records': total_recs,
             'ground_truth_records': len(self.ground_truth),
             'matched_count': matched_count,
             'exception_count': exception_count,
             'disagreement_count': disagreement_count,
             'unresolved_count': unresolved_count,
+            # ── Coverage ─────────────────────────────────────────────────
+            'coverage_mode': coverage_mode,
+            'ground_truth_coverage': ground_truth_coverage,
+            'unverified_count': unverified_count,
+            # ── Verified metrics (precision/recall/F1/FPR) ───────────────
             'match_rate': round(match_rate, 4),
             'precision': round(precision, 4),
             'recall': round(recall, 4),
@@ -151,24 +246,29 @@ class MetricsEvaluator:
             'false_positives': false_positives,
             'true_negatives': true_negatives,
             'false_negatives': false_negatives,
-            'f1_score': round(f1, 4)
+            'f1_score': round(f1, 4),
         }
-        
+
+        # In "assumed" mode, also expose the assumed counts clearly labelled
+        if coverage_mode == "assumed":
+            metrics['assumed_true_positives'] = assumed_true_positives
+            metrics['assumed_true_negatives'] = assumed_true_negatives
+
         # Save report to both output_path and root metrics_report.json
         if output_path:
             os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
             with open(output_path, 'w') as f:
                 json.dump(metrics, f, indent=2)
-            
+
             # Keep root metrics_report.json synced
             try:
                 with open("metrics_report.json", 'w') as f:
                     json.dump(metrics, f, indent=2)
             except Exception:
                 pass
-        
+
         return metrics
-    
+
     def _find_ground_truth(
         self,
         result: Dict,
@@ -182,24 +282,29 @@ class MetricsEvaluator:
         pid = result.get('payment_id') or self._extract_field(result, 'payment_id')
         if pid and str(pid).lower() in gt_by_payment:
             return gt_by_payment[str(pid).lower()]
-        
+
         # Order ID
         oid = result.get('order_id') or self._extract_field(result, 'order_id')
         if oid and str(oid).lower() in gt_by_order:
             return gt_by_order[str(oid).lower()]
-        
+
         # UTR
-        utr = result.get('settlement_utr') or result.get('utr') or self._extract_field(result, 'settlement_utr') or self._extract_field(result, 'utr')
+        utr = (
+            result.get('settlement_utr')
+            or result.get('utr')
+            or self._extract_field(result, 'settlement_utr')
+            or self._extract_field(result, 'utr')
+        )
         if utr and str(utr).lower() in gt_by_utr:
             return gt_by_utr[str(utr).lower()]
-        
+
         # Bank transaction ID
         txid = result.get('txn_id') or self._extract_field(result, 'txn_id')
         if txid and str(txid).lower() in gt_by_bank_txn:
             return gt_by_bank_txn[str(txid).lower()]
-        
+
         return None
-    
+
     def _extract_field(self, result: Dict, field_name: str) -> Optional[Any]:
         """Extract a nested field from settlement, counterpart, bank, or ledger dicts."""
         for key in ['settlement', 'counterpart', 'bank', 'ledger']:
@@ -207,7 +312,7 @@ class MetricsEvaluator:
             if isinstance(nested, dict) and field_name in nested:
                 return nested[field_name]
         return None
-    
+
     def evaluate_from_files(
         self,
         decisions: List[Dict],
@@ -215,12 +320,19 @@ class MetricsEvaluator:
     ) -> Dict[str, Any]:
         """
         Helper method for API callers to evaluate results and format response.
+
+        Always uses ``coverage_mode="strict"`` — unlabeled records are never
+        silently promoted to true positives.
         """
         if ground_truth_path and ground_truth_path != self.ground_truth_path:
             self.ground_truth_path = ground_truth_path
             self.ground_truth = self._load_ground_truth()
-        
-        metrics = self.evaluate(decisions, output_path="metrics/metrics_report.json")
+
+        metrics = self.evaluate(
+            decisions,
+            output_path="metrics/metrics_report.json",
+            coverage_mode="strict"
+        )
         summary = {
             "total_records": metrics.get('total_records', len(decisions)),
             "matched": metrics.get('matched_count', 0),
@@ -229,38 +341,58 @@ class MetricsEvaluator:
             "unresolved": metrics.get('unresolved_count', 0),
             "match_rate_pct": round(metrics.get('match_rate', 0.0) * 100, 2),
             "precision_pct": round(metrics.get('precision', 0.0) * 100, 2),
-            "recall_pct": round(metrics.get('recall', 0.0) * 100, 2)
+            "recall_pct": round(metrics.get('recall', 0.0) * 100, 2),
+            "ground_truth_coverage_pct": round(
+                metrics.get('ground_truth_coverage', 0.0) * 100, 2
+            ),
+            "unverified_count": metrics.get('unverified_count', 0),
+            "coverage_mode": metrics.get('coverage_mode', 'strict'),
         }
         return {"metrics": metrics, "summary": summary}
-    
+
     def print_summary(self, metrics: Dict[str, Any]):
         """Print human-readable metrics summary."""
-        print("\n" + "="*50)
+        print("\n" + "="*60)
         print("RECONCILIATION METRICS SUMMARY")
-        print("="*50)
-        print(f"Total Records:      {metrics['total_records']}")
-        print(f"Ground Truth:       {metrics['ground_truth_records']} records")
-        print("-"*50)
+        print("="*60)
+        mode = metrics.get('coverage_mode', 'strict')
+        coverage = metrics.get('ground_truth_coverage', 0.0)
+        unverified = metrics.get('unverified_count', 0)
+        total = metrics.get('total_records', 0)
+        scored = total - unverified
+        print(f"Coverage Mode:      {mode.upper()}")
+        print(f"Ground-Truth Coverage: {coverage*100:.1f}%  "
+              f"({scored} of {total} records verified)")
+        if unverified > 0:
+            print(f"Unverified Records: {unverified}  "
+                  "(excluded from precision/recall/F1 in strict mode)")
+        print("-"*60)
+        print(f"Total Records:      {total}")
+        print(f"Ground Truth File:  {metrics.get('ground_truth_records', 0)} entries")
+        print("-"*60)
         print(f"Match Rate:         {metrics['match_rate']*100:.1f}%")
         print(f"Precision:          {metrics['precision']*100:.1f}%")
         print(f"Recall:             {metrics['recall']*100:.1f}%")
         print(f"F1 Score:           {metrics['f1_score']*100:.1f}%")
         print(f"False Positive Rate:{metrics['false_positive_rate']*100:.1f}%")
-        print("-"*50)
+        print("-"*60)
         print(f"True Positives:     {metrics['true_positives']}")
         print(f"False Positives:    {metrics['false_positives']}")
         print(f"True Negatives:     {metrics['true_negatives']}")
         print(f"False Negatives:    {metrics['false_negatives']}")
-        print("-"*50)
+        if mode == "assumed":
+            print(f"  (assumed TP):     {metrics.get('assumed_true_positives', 0)}")
+            print(f"  (assumed TN):     {metrics.get('assumed_true_negatives', 0)}")
+        print("-"*60)
         print(f"Disagreements:      {metrics['disagreement_count']}")
         print(f"Unresolved:         {metrics['unresolved_count']}")
-        print("="*50 + "\n")
+        print("="*60 + "\n")
 
 
 def evaluate_cli():
     """CLI entry point for running metrics evaluation."""
     import argparse
-    
+
     parser = argparse.ArgumentParser(
         description="Evaluate reconciliation results against ground truth"
     )
@@ -270,24 +402,36 @@ def evaluate_cli():
                         help="Path to ground truth JSON file")
     parser.add_argument("--output", type=str, default="metrics/metrics_report.json",
                         help="Output path for metrics report")
-    
+    parser.add_argument(
+        "--coverage-mode", type=str, default="strict",
+        choices=["strict", "assumed"],
+        help=(
+            "strict (default): only score records with a real ground-truth entry. "
+            "assumed: legacy heuristic fallback — for debugging only."
+        )
+    )
+
     args = parser.parse_args()
-    
+
     # Load results
     if not os.path.exists(args.results):
         print(f"Error: Results file not found at {args.results}")
         return 1
-    
+
     with open(args.results, 'r') as f:
         results = json.load(f)
-    
+
     # Evaluate
     evaluator = MetricsEvaluator(ground_truth_path=args.ground_truth)
-    metrics = evaluator.evaluate(results, output_path=args.output)
+    metrics = evaluator.evaluate(
+        results,
+        output_path=args.output,
+        coverage_mode=args.coverage_mode
+    )
     evaluator.print_summary(metrics)
-    
+
     print(f"Metrics saved to {args.output}")
-    
+
     return 0
 
 

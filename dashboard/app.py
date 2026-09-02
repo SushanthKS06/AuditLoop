@@ -98,6 +98,21 @@ def main():
             help="Harmonic mean of precision and recall"
         )
     
+    # Ground-truth coverage — always visible so it can never be silently assumed
+    gt_total = metrics.get('total_records', 0)
+    gt_unverified = metrics.get('unverified_count', 0)
+    gt_scored = gt_total - gt_unverified
+    gt_coverage_pct = metrics.get('ground_truth_coverage', 0) * 100
+    coverage_mode = metrics.get('coverage_mode', 'strict')
+    if gt_total > 0:
+        st.caption(
+            f"**Ground-truth coverage:** {gt_scored} of {gt_total} records "
+            f"({gt_coverage_pct:.1f}%) — "
+            f"precision / recall / F1 above are computed **only** over the "
+            f"verified subset (mode: `{coverage_mode}`). "
+            + (f"{gt_unverified} record(s) had no ground-truth entry and were excluded." if gt_unverified > 0 else "All records verified.")
+        )
+    
     # Secondary metrics row
     col5, col6, col7, col8 = st.columns(4)
     
@@ -145,6 +160,19 @@ def main():
             
         neg_count = tn + fp
         st.caption(f"False Positive Rate: {metrics.get('false_positive_rate', 0)*100:.1f}% — Computed on {neg_count} known-negative ground-truth cases (treat as directional, not statistically robust).")
+        
+        st.divider()
+        cov_mode = metrics.get('coverage_mode', 'strict')
+        cov_pct = metrics.get('ground_truth_coverage', 0) * 100
+        unv = metrics.get('unverified_count', 0)
+        tot = metrics.get('total_records', 0)
+        scored = tot - unv
+        st.caption(
+            f"Ground-truth coverage: **{scored} of {tot} records ({cov_pct:.1f}%)** — "
+            f"metrics above are computed only over the verified subset "
+            f"(coverage_mode=`{cov_mode}`). "
+            + (f"{unv} record(s) had no ground-truth entry and were excluded from precision/recall/F1/FPR." if unv > 0 else "All records have a ground-truth entry.")
+        )
     
     st.divider()
     

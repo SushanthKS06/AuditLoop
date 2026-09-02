@@ -202,6 +202,12 @@ pytest tests/test_end_to_end_metrics.py -v
 
 ## Key Metrics Explained
 
+All headline metrics (precision, recall, F1) are computed in **strict coverage
+mode**: only records that have a matching entry in `data/ground_truth.json` are
+scored. Records without a ground-truth entry are excluded and counted as
+`unverified_count`. The dashboard always displays `ground_truth_coverage` next
+to the metrics so this number is never silently assumed.
+
 | Metric | What It Means | Target |
 |--------|---------------|--------|
 | **Match Rate** | % of records successfully reconciled | >80% |
@@ -209,6 +215,33 @@ pytest tests/test_end_to_end_metrics.py -v
 | **Recall** | Of all true matches, how many did we find | >75% |
 | **Disagreement Rate** | LLM vs deterministic conflicts | <10% |
 | **Unresolved Rate** | Exceptions needing human review | <5% |
+| **Ground-Truth Coverage** | Fraction of records that have a verified GT label | Should be 1.0 on a fresh run |
+
+## Regenerating Metrics
+
+`metrics_report.json`, `metrics/metrics_report.json`, and `results.json` are
+**always written by the pipeline** — never hand-edited. To reproduce the exact
+numbers from scratch (same seed → same output):
+
+```bash
+# Step 1: Rebuild ground truth and synthetic data (same seed as pipeline)
+python data/build_ground_truth.py --records 80 --seed 42
+
+# Step 2: Run the full reconciliation pipeline
+#   (with LLM if GROQ_API_KEY is set, without otherwise)
+python run_pipeline.py --seed 42 --records 80
+
+# Step 3: Inspect metrics  (also written to metrics/metrics_report.json)
+cat metrics_report.json
+
+# Step 4: Optionally re-evaluate standalone (strict mode is the default)
+python -m metrics.evaluate --results results.json
+```
+
+After a fresh run, `ground_truth_coverage` should be **1.0** because
+`build_ground_truth.py` generates a GT entry for every record in the batch.
+If you change `--records` or `--seed`, always re-run Step 1 first so the
+ground-truth file stays in sync.
 
 ## Understanding Disagreements
 

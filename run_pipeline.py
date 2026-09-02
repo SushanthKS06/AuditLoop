@@ -61,7 +61,7 @@ class ReconciliationPipeline:
         self.dispatcher = ExceptionDispatcher(llm_client=self.llm_client)
         self.dispatcher.set_audit_callback(self._audit_callback)
         
-        self.evaluator = MetricsEvaluator()
+        self.evaluator = MetricsEvaluator()  # ground_truth_path reloaded after generation
         
         # Results storage
         self.all_results = []
@@ -206,9 +206,12 @@ class ReconciliationPipeline:
             json.dump(self.all_results, f, indent=2, default=str)
         print(f"  Results saved to {results_path}")
         
-        # Step 5: Compute metrics
+        # Step 5: Compute metrics (always strict — no silent self-grading)
         print("\n[Step 5] Computing metrics...")
-        metrics = self.evaluator.evaluate(self.all_results)
+        metrics = self.evaluator.evaluate(
+            self.all_results,
+            coverage_mode="strict"
+        )
         self.evaluator.print_summary(metrics)
         
         # Get audit summary
@@ -272,6 +275,15 @@ class ReconciliationPipeline:
             )
             if os.path.exists(settlements_path):
                 settlements_df = pd.read_csv(settlements_path)
+            # Reload evaluator's ground truth from the freshly-written file so
+            # that strict-mode coverage reflects the current batch (not a stale
+            # 20-record file from a previous run).
+            gt_path = os.path.join("data", "ground_truth.json")
+            if os.path.exists(gt_path):
+                self.evaluator.ground_truth_path = gt_path
+                self.evaluator.ground_truth = self.evaluator._load_ground_truth()
+                print(f"  Ground truth reloaded: "
+                      f"{len(self.evaluator.ground_truth)} entries from {gt_path}")
         else:
             bank_df = pd.read_csv(bank_path) if os.path.exists(bank_path) else pd.DataFrame()
             ledger_df = pd.read_csv(ledger_path) if os.path.exists(ledger_path) else pd.DataFrame()
