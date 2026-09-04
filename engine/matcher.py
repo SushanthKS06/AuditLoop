@@ -647,11 +647,18 @@ class DeterministicMatcher:
                 count_id = str(count.get('txn_id') or count.get('order_id') or count.get('payment_id') or count.get('customer_ref') or count.get('utr') or '')
                 rec_id = f"{sett_id}-{count_id}" if sett_id and count_id else (sett_id or count_id)
                 src = sett.get('source') or count.get('source') or 'synthetic'
+                # Track whether a bank leg is present in the exception record.
+                # 3-way reconciliation requires: settlement + bank + ledger.
+                # If the counterpart is a ledger entry (no bank), has_bank_leg=False.
+                has_bank = row.get('bank') is not None and not (
+                    isinstance(row.get('bank'), dict) and not row.get('bank')
+                )
                 exceptions.append({
                     'type': 'low_confidence',
                     'record_ids': rec_id,
                     'settlement': sett,
                     'counterpart': count,
+                    'has_bank_leg': has_bank,
                     'confidence': row.get('confidence', 0),
                     'rule_fired': row.get('rule_fired', ''),
                     'source': src,

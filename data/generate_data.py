@@ -363,8 +363,22 @@ class SyntheticDataGenerator:
             gt_notes = "Orphaned ledger record"
             
         elif messiness_type == "partial_refund":
+            # Partial refund scenario:
+            # The settlement represents a REFUND (negative credit back to customer).
+            # The ledger still shows the original positive expected_amount.
+            # The bank_amount is therefore negative (money leaving the merchant account).
+            #
+            # ARCHITECTURAL NOTE: AuditLoop uses single-record 3-way matching.
+            # True multi-record refund reconciliation (one ledger row mapped to N settlements)
+            # is not supported in v1.  This scenario is therefore correctly routed to
+            # the exception queue for human review, rather than silently matched.
+            # This is the correct conservative behaviour for a financial system.
+            bank_amount = -abs(bank_amount)  # Refund debit from merchant account
             gt_root_cause = "partial_refund"
-            gt_notes = "Partial refund - may need multi-record matching"
+            gt_notes = (
+                "Partial refund: bank shows negative debit. "
+                "Requires human review — multi-record aggregation not supported in v1."
+            )
             
         elif messiness_type == "formatting_noise":
             # Add formatting noise to narration

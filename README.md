@@ -6,9 +6,10 @@ Multi-source reconciliation agent for Razorpay settlements, bank statements,
 and internal ledgers. A deterministic matching engine runs first; an LLM is
 only invoked to explain and propose resolutions for unresolved exceptions —
 it can never commit a match directly, every proposal is re-verified
-deterministically before it counts. Every decision, matched or not, is
-logged to an audit trail. Accuracy is measured against a known ground-truth
-batch, not demoed on cherry-picked examples.
+deterministically before it counts. A strict 3-way reconciliation invariant 
+(Settlement + Bank + Ledger must all be present) is enforced by the deterministic gate. 
+Every decision, matched or not, is logged to a tamper-evident cryptographic audit trail. 
+Accuracy is measured against a known ground-truth batch, not demoed on cherry-picked examples.
 
 Settlements data is pulled live from Razorpay's test-mode Settlement Recon
 API; bank statement and ledger data are synthetic (clearly tagged where
@@ -106,7 +107,7 @@ curl -X POST http://localhost:8000/audit/resolve \
 curl -X POST http://localhost:8000/reconcile \
   -H "X-API-Key: dev-secret-key" \
   -H "Content-Type: application/json" \
-  -d '{"records": 20, "seed": 42, "messiness": 0.25, "force_disagreement": true}'
+  -d '{"records": 20, "seed": 42, "messiness": 0.25, "demo_disagreement": true}'
 
 # Get latest metrics
 curl -H "X-API-Key: dev-secret-key" http://localhost:8000/metrics
@@ -154,7 +155,7 @@ pip install -r requirements.txt
 python data/generate_data.py --records 20 --seed 42
 
 # Run the full pipeline
-python run_pipeline.py --force-disagreement --records 20
+python run_pipeline.py --demo-disagreement --records 20
 
 # View metrics
 cat metrics_report.json
@@ -180,7 +181,7 @@ python data/fetch_settlements.py --year 2026 --month 9 --day 1
 python data/generate_data.py --records 20 --seed 42 --settlements data/settlements_live.csv
 
 # 5. Run pipeline
-python run_pipeline.py --force-disagreement --records 20
+python run_pipeline.py --demo-disagreement --records 20
 ```
 
 ## Configuration
@@ -197,6 +198,16 @@ python run_pipeline.py --force-disagreement --records 20
 | `AUDIT_DB_PATH` | Path to SQLite audit trail database | No (default: `audit_trail.db` / `/app/runtime/audit_trail.db`) |
 | `RESULTS_PATH` | Path to reconciliation results JSON | No (default: `results.json` / `/app/runtime/results.json`) |
 | `METRICS_PATH` | Path to metrics evaluation JSON | No (default: `metrics_report.json` / `/app/runtime/metrics_report.json`) |
+
+## Honest System Limitations & Security Invariants
+
+As a genuinely submission-ready financial system, AuditLoop explicitly declares its invariants and limitations:
+
+1. **3-Way Reconciliation Invariant:** A match *requires* all three legs (Settlement + Bank + Ledger). If a bank transaction is missing, the deterministic gate will explicitly reject any LLM proposal to match, producing an `llm_deterministic_disagreement`. The system fails closed.
+2. **PII Sanitization:** The `llm/privacy.py` layer proactively redacts PAN numbers, IFSC codes, bank account numbers, UPI VPAs, phone numbers, and emails before the payload ever reaches the LLM. 
+3. **Tamper-Evident Audit Log:** The SQLite audit log uses a SHA-256 hash chain (previous block hash + data = current hash) protected by immediate transactions and thread locks. It is *tamper-evident* (cryptographically verifiable via `/audit/verify`), not strictly "immutable" (since an attacker with root DB access could recalculate the chain, though this requires rewriting history).
+4. **API Honesty:** The `/health` endpoint truthfully reports LLM status as `configured` (if the API key is present) rather than `connected`, since the system does not ping the LLM to verify upstream connectivity on every health check.
+5. **Partial Refunds:** True multi-record partial refund aggregation (e.g., mapping one Ledger order row to multiple Settlements/Refunds) is not supported in the v1 matching engine. Such cases are correctly and safely routed to the exception queue for human review rather than being silently mis-matched.
 
 ## Running Tests
 
@@ -274,7 +285,7 @@ When you see `llm_deterministic_disagreement` cases in the dashboard:
 
 This is the core differentiator: *The LLM can propose, but never commit.*
 
-To guarantee at least one LLM-vs-deterministic disagreement is visible in every demo run (these are rare in a small batch), you can pass `force_disagreement=true` to `/reconcile` (or `--force-disagreement` to `run_pipeline.py`). This injects one fully-labeled synthetic case (`forced_demo_case: true` in its audit record) — it does not affect real exception processing. Set it to `false` to see only organically-discovered disagreements.
+To guarantee at least one LLM-vs-deterministic disagreement is visible in every demo run (these are rare in a small batch), you can pass `demo_disagreement=true` to `/reconcile` (or `--demo-disagreement` to `run_pipeline.py`). This injects one fully-labeled synthetic case (`forced_demo_case: true` in its audit record) — it does not affect organic exception processing metrics. Set it to `false` to see only organically-discovered disagreements.
 
 ## Reproducibility
 

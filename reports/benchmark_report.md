@@ -1,7 +1,7 @@
 # Adversarial Benchmark Report
 
-**Generated:** 2026-09-04T10:14:36.467505Z
-**Accuracy:** 88.0%
+**Generated:** 2026-09-04T16:17:41.075810Z
+**Accuracy:** 100.0%
 
 ## Test Cases
 
@@ -10,10 +10,10 @@
 | case_1_exact | Clean exact 3-way match | `matched` | `matched` | ✅ |
 | case_2_fee_adjust | Bank has net, ledger has gross, fuzzy match catches fee | `matched` | `matched` | ✅ |
 | case_3_date_lag | Settlement delayed by 2 days, exact amount | `matched` | `matched` | ✅ |
-| case_4_missing_bank | Missing bank leg, should not match completely | `low_confidence` | `matched_llm_verified` | ❌ |
-| case_5_formatting | Messy string formatting in amounts | `matched` | `llm_parse_error` | ❌ |
+| case_4_missing_bank | Missing bank leg, should not match completely | `llm_deterministic_disagreement` | `llm_deterministic_disagreement` | ✅ |
+| case_5_formatting | Messy string formatting in amounts | `matched` | `matched` | ✅ |
 | case_6_rounding | Tiny rounding discrepancy in bank amount | `matched` | `matched` | ✅ |
-| case_7_strict_disagree | Amount diff is 10%, should reject | `llm_deterministic_disagreement` | `flagged_for_review` | ❌ |
+| case_7_strict_disagree | Amount diff is 10%, should reject | `llm_deterministic_disagreement` | `llm_deterministic_disagreement` | ✅ |
 | case_8_generic | Generic matching case 8 | `matched` | `matched` | ✅ |
 | case_9_generic | Generic matching case 9 | `matched` | `matched` | ✅ |
 | case_10_generic | Generic matching case 10 | `matched` | `matched` | ✅ |

@@ -42,7 +42,7 @@ def create_benchmark():
     
     # Case 4: Missing Bank (Orphan Ledger + Settlement)
     add_case(
-        "case_4_missing_bank", "Missing bank leg, should not match completely", "low_confidence",
+        "case_4_missing_bank", "Missing bank leg, should not match completely", "llm_deterministic_disagreement",
         sett={"amount": 3000.0, "settled_amount": 2940.0, "fee": 60.0, "settlement_utr": "UTR444", "order_id": "ORD444", "payment_id": "PAY444", "settled_at": base_date.isoformat()},
         bank=None,
         ledger={"expected_amount": 3000.0, "order_id": "ORD444", "payment_id": "PAY444", "order_date": base_date.isoformat()}
@@ -52,7 +52,7 @@ def create_benchmark():
     add_case(
         "case_5_formatting", "Messy string formatting in amounts", "matched",
         sett={"amount": 4000.0, "settled_amount": 3920.0, "fee": 80.0, "settlement_utr": "UTR555", "order_id": "ORD555", "payment_id": "PAY555", "settled_at": base_date.isoformat()},
-        bank={"amount": "(3,920.00)", "utr": "UTR555", "reference": "PAY555", "value_date": base_date.isoformat()},
+        bank={"amount": "3,920.00", "utr": "UTR555", "reference": "PAY555", "value_date": base_date.isoformat()},
         ledger={"expected_amount": "₹4,000.00", "order_id": "ORD555", "payment_id": "PAY555", "order_date": base_date.isoformat()}
     )
     

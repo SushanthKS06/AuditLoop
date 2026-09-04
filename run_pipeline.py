@@ -109,11 +109,12 @@ class ReconciliationPipeline:
         ledger_path: str = "data/internal_ledger.csv",
         generate_if_missing: bool = True,
         num_records: int = 80,
-        seed: int = 42
+        seed: int = 42,
+        messiness_ratio: float = 0.25
     ) -> dict:
         """
         Run the full reconciliation pipeline.
-        
+
         Args:
             settlements_path: Path to settlements CSV
             bank_path: Path to bank statement CSV
@@ -121,7 +122,10 @@ class ReconciliationPipeline:
             generate_if_missing: Generate synthetic data if files missing
             num_records: Number of synthetic records to generate
             seed: Random seed for reproducibility
-            
+            messiness_ratio: Fraction of synthetic records with injected issues (0.0-1.0).
+                             Propagated from the API ``/generate`` endpoint so callers
+                             control data quality without touching defaults.
+
         Returns:
             Dictionary with pipeline results and metrics
         """
@@ -145,7 +149,8 @@ class ReconciliationPipeline:
         print("\n[Step 0] Loading data...")
         settlements_df, bank_df, ledger_df = self._load_or_generate_data(
             settlements_path, bank_path, ledger_path,
-            generate_if_missing, num_records, seed
+            generate_if_missing, num_records, seed,
+            messiness_ratio=messiness_ratio
         )
         
         if settlements_df.empty:
@@ -492,7 +497,8 @@ class ReconciliationPipeline:
         ledger_path: str,
         generate: bool,
         num_records: int,
-        seed: int
+        seed: int,
+        messiness_ratio: float = 0.25
     ) -> tuple:
         """Load existing data or generate synthetic data."""
         
@@ -527,7 +533,7 @@ class ReconciliationPipeline:
         )
         
         if needs_generation:
-            generator = SyntheticDataGenerator(seed=seed, messiness_ratio=0.40)
+            generator = SyntheticDataGenerator(seed=seed, messiness_ratio=messiness_ratio)
             bank_df, ledger_df, _ = generator.generate(
                 num_records=num_records,
                 settlements_df=settlements_df if settlements_df is not None and len(settlements_df) == num_records else None,

@@ -152,7 +152,12 @@ async def health_check():
     with llm_status indicating LLM connectivity/configuration status.
     """
     llm_key = os.getenv("GROQ_API_KEY")
-    llm_status = "connected" if llm_key and len(llm_key.strip()) > 5 else "not_configured"
+    # Claim only what we can prove without a live network call:
+    # 'configured'     - an API key is present in the environment.
+    # 'not_configured' - no key found; LLM calls will be skipped.
+    # We deliberately do NOT claim 'connected' without an actual connectivity
+    # probe, as that would be a misleading health indicator.
+    llm_status = "configured" if llm_key and len(llm_key.strip()) > 5 else "not_configured"
 
     return HealthResponse(
         status="healthy",
@@ -192,7 +197,8 @@ def run_reconciliation(request: ReconcileRequest):
             ledger_path=request.ledger_path,
             generate_if_missing=True,
             num_records=request.records,
-            seed=request.seed
+            seed=request.seed,
+            messiness_ratio=request.messiness  # propagate API param — never silently discard
         )
         
         if "error" in results:

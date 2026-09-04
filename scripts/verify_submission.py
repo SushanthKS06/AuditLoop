@@ -47,8 +47,10 @@ def run_benchmark():
     with open("data/adversarial_benchmark.json", "r") as f:
         cases = json.load(f)
         
+    from tests.mock_llm import MockLLMClient
+    
     matcher = DeterministicMatcher()
-    llm_client = create_client()
+    llm_client = MockLLMClient()
     dispatcher = ExceptionDispatcher(llm_client=llm_client)
     
     results = []

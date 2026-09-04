@@ -27,4 +27,4 @@ ENV RESULTS_PATH=/app/runtime/results.json
 ENV METRICS_PATH=/app/runtime/metrics_report.json
 
 # Default command runs the pipeline with sample data
-CMD ["python", "run_pipeline.py", "--force-disagreement"]
+CMD ["python", "run_pipeline.py", "--demo-disagreement", "--no-llm"]

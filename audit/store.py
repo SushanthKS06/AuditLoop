@@ -4,11 +4,29 @@ Audit Trail Models and Storage
 Append-only SQLite audit log with SHA-256 cryptographic hash chaining.
 Every decision, matched or not, leaves a tamper-evident record.
 Never mutate rows - only append new records.
+
+Concurrency safety
+------------------
+append() uses both a process-local threading.Lock AND a SQLite
+"BEGIN IMMEDIATE" transaction so that the SELECT-then-INSERT sequence
+is atomic against both thread-level and process-level concurrent writers.
+
+* The threading.Lock serialises within a single process (fast path).
+* BEGIN IMMEDIATE acquires a reserved lock at the DB level so a second
+  process that bypasses the in-process lock still cannot interleave.
+
+Ordering guarantee
+------------------
+The canonical chain order is the auto-increment ``id`` column, not the
+timestamp.  Two records inserted in the same millisecond receive different
+ids and are ordered correctly.  The ``current_status`` view likewise uses
+MAX(id), not MAX(timestamp).
 """
 
 import sqlite3
 import hashlib
 import os
+import threading
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from contextlib import contextmanager
@@ -36,6 +54,11 @@ class AuditStore:
             db_path: Path to SQLite database file. Defaults to AUDIT_DB_PATH env var or 'audit_trail.db'.
         """
         self.db_path = db_path or os.getenv("AUDIT_DB_PATH", "audit_trail.db")
+        # In-process serialisation lock.  Ensures that even within a single
+        # Python process multiple threads cannot interleave their
+        # SELECT-then-INSERT sequences.  The DB-level BEGIN IMMEDIATE below
+        # provides the equivalent guarantee across processes.
+        self._lock = threading.Lock()
         self._init_db()
     
     @contextmanager
@@ -90,16 +113,21 @@ class AuditStore:
                 ON audit_log(record_ids)
             """)
             
-            # Create view for current status (latest decision per record)
+            # Create view for current status (latest decision per record).
+            # Uses MAX(id) — the monotonic autoincrement primary key — as the
+            # canonical ordering primitive.  MAX(timestamp) is ambiguous when
+            # two records are inserted within the same millisecond (common under
+            # concurrent load), whereas id is always unique and strictly ordered.
+            conn.execute("DROP VIEW IF EXISTS current_status")
             conn.execute("""
                 CREATE VIEW IF NOT EXISTS current_status AS
                 SELECT a.*
                 FROM audit_log a
                 INNER JOIN (
-                    SELECT record_ids, MAX(timestamp) as max_ts
+                    SELECT record_ids, MAX(id) as max_id
                     FROM audit_log
                     GROUP BY record_ids
-                ) b ON a.record_ids = b.record_ids AND a.timestamp = b.max_ts
+                ) b ON a.record_ids = b.record_ids AND a.id = b.max_id
             """)
             
             conn.commit()
@@ -128,59 +156,93 @@ class AuditStore:
     def append(self, record: Dict[str, Any]) -> int:
         """
         Append a new audit record with cryptographic hash chaining.
-        
+
+        Atomicity guarantee
+        -------------------
+        The method acquires self._lock (in-process) then opens a SQLite
+        connection with ``BEGIN IMMEDIATE``.  BEGIN IMMEDIATE acquires a
+        reserved lock immediately, preventing any other writer from
+        beginning a conflicting write transaction until this one commits.
+        This makes the SELECT-then-INSERT sequence atomic across both
+        threads and processes.
+
         Args:
             record: Dictionary with audit fields
-            
+
         Returns:
             ID of the inserted record
         """
-        with self._get_connection() as conn:
-            # Fetch latest hash in the chain
-            cursor = conn.execute("SELECT record_hash FROM audit_log ORDER BY id DESC LIMIT 1")
-            last_row = cursor.fetchone()
-            previous_hash = last_row['record_hash'] if (last_row and last_row['record_hash']) else self.GENESIS_HASH
-            
-            timestamp = record.get('timestamp') or datetime.now(timezone.utc).isoformat()
-            record_ids = record.get('record_ids', '')
-            stage = record.get('stage', 'unknown')
-            rule_fired = record.get('rule_fired')
-            confidence = record.get('confidence')
-            decision = record.get('decision', 'unknown')
-            match_type = record.get('match_type')
-            llm_reasoning = record.get('llm_reasoning')
-            final_status = record.get('final_status') or decision
-            source = record.get('source') or 'synthetic'
-            forced_demo_case = 1 if record.get('forced_demo_case') else 0
-            
-            record_hash = self._compute_hash(
-                previous_hash=previous_hash,
-                timestamp=timestamp,
-                record_ids=record_ids,
-                stage=stage,
-                decision=decision,
-                rule_fired=rule_fired,
-                confidence=confidence,
-                final_status=final_status,
-                match_type=match_type,
-                llm_reasoning=llm_reasoning,
-                source=source,
-                forced_demo_case=forced_demo_case
-            )
-            
-            cursor = conn.execute("""
-                INSERT INTO audit_log (
-                    timestamp, record_ids, stage, rule_fired, 
+        with self._lock:
+            # isolation_level=None → autocommit off; we manage transactions manually
+            conn = sqlite3.connect(self.db_path, timeout=30.0, isolation_level=None)
+            conn.row_factory = sqlite3.Row
+            try:
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA busy_timeout=10000;")
+                # BEGIN IMMEDIATE: acquire a reserved lock immediately so no
+                # concurrent writer can interleave between our SELECT and INSERT.
+                conn.execute("BEGIN IMMEDIATE")
+
+                # Fetch the latest hash in the chain (inside the locked transaction)
+                cursor = conn.execute(
+                    "SELECT record_hash FROM audit_log ORDER BY id DESC LIMIT 1"
+                )
+                last_row = cursor.fetchone()
+                previous_hash = (
+                    last_row['record_hash']
+                    if (last_row and last_row['record_hash'])
+                    else self.GENESIS_HASH
+                )
+
+                timestamp = record.get('timestamp') or datetime.now(timezone.utc).isoformat()
+                record_ids = record.get('record_ids', '')
+                stage = record.get('stage', 'unknown')
+                rule_fired = record.get('rule_fired')
+                confidence = record.get('confidence')
+                decision = record.get('decision', 'unknown')
+                match_type = record.get('match_type')
+                llm_reasoning = record.get('llm_reasoning')
+                final_status = record.get('final_status') or decision
+                source = record.get('source') or 'synthetic'
+                forced_demo_case = 1 if record.get('forced_demo_case') else 0
+
+                record_hash = self._compute_hash(
+                    previous_hash=previous_hash,
+                    timestamp=timestamp,
+                    record_ids=record_ids,
+                    stage=stage,
+                    decision=decision,
+                    rule_fired=rule_fired,
+                    confidence=confidence,
+                    final_status=final_status,
+                    match_type=match_type,
+                    llm_reasoning=llm_reasoning,
+                    source=source,
+                    forced_demo_case=forced_demo_case
+                )
+
+                cursor = conn.execute("""
+                    INSERT INTO audit_log (
+                        timestamp, record_ids, stage, rule_fired,
+                        confidence, decision, match_type, llm_reasoning, final_status,
+                        source, forced_demo_case, previous_hash, record_hash
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    timestamp, record_ids, stage, rule_fired,
                     confidence, decision, match_type, llm_reasoning, final_status,
                     source, forced_demo_case, previous_hash, record_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                timestamp, record_ids, stage, rule_fired,
-                confidence, decision, match_type, llm_reasoning, final_status,
-                source, forced_demo_case, previous_hash, record_hash
-            ))
-            conn.commit()
-            return cursor.lastrowid
+                ))
+                inserted_id = cursor.lastrowid
+                conn.execute("COMMIT")
+                return inserted_id
+            except Exception:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                raise
+            finally:
+                conn.close()
     
     def verify_integrity(self) -> Dict[str, Any]:
         """

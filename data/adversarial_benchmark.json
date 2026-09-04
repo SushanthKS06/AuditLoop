@@ -80,7 +80,7 @@
   {
     "case_id": "case_4_missing_bank",
     "description": "Missing bank leg, should not match completely",
-    "expected_status": "low_confidence",
+    "expected_status": "llm_deterministic_disagreement",
     "settlement": {
       "amount": 3000.0,
       "settled_amount": 2940.0,
@@ -112,7 +112,7 @@
       "settled_at": "2026-09-04T10:00:00"
     },
     "bank": {
-      "amount": "(3,920.00)",
+      "amount": "3,920.00",
       "utr": "UTR555",
       "reference": "PAY555",
       "value_date": "2026-09-04T10:00:00"

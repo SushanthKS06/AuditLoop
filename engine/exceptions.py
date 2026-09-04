@@ -3,6 +3,14 @@ Stage 3: Exception Dispatcher
 
 Routes unresolved records to the LLM layer for explanation and resolution proposals.
 Never commits matches directly - all LLM proposals go through deterministic re-verification.
+
+Core invariant (enforced in _deterministic_recheck)
+---------------------------------------------------
+A settlement with a missing bank leg OR a missing ledger leg can NEVER produce
+a final_status of 'matched_llm_verified', regardless of what the LLM proposes.
+The LLM may PROPOSE 'match' but the deterministic gate will reject it.
+
+Design principle: DETERMINISTIC SYSTEMS DECIDE. LLM SYSTEMS PROPOSE.
 """
 
 import time
@@ -162,7 +170,8 @@ class ExceptionDispatcher:
                     if proposal_result.get('action') == 'match':
                         recheck_passed = self._deterministic_recheck(
                             exception.get('settlement'),
-                            exception.get('counterpart')
+                            exception.get('counterpart'),
+                            exception_context=exception  # carries has_bank_leg flag
                         )
                         result['deterministic_recheck_passed'] = recheck_passed
                         
@@ -215,24 +224,100 @@ class ExceptionDispatcher:
         
         return result
     
-    def _deterministic_recheck(
+    def _all_required_counterparts_present(
         self,
         settlement: Optional[Dict],
         counterpart: Optional[Dict]
     ) -> bool:
         """
+        Invariant gate: verify that enough counterpart data exists to confirm a match.
+
+        A full 3-way reconciliation requires all three legs:
+          settlement + bank + ledger
+
+        At Stage 3 exceptions we only receive the settlement and one counterpart
+        (either bank or ledger, whichever was available).  If that counterpart is
+        None *or* has no amount field, we cannot confirm a match and must return
+        False immediately — BEFORE any numeric comparison.
+
+        This prevents the scenario where:
+          1. A settlement has no bank record (orphan)
+          2. The LLM incorrectly proposes action='match'
+          3. _deterministic_recheck accidentally passes on edge-case amounts
+          4. The result is promoted to 'matched_llm_verified'
+
+        Returns:
+            True only when both settlement and counterpart carry the minimum
+            required fields for a deterministic numeric comparison.
+        """
+        if not settlement:
+            return False
+        if not counterpart:
+            return False
+
+        # Settlement must have at least one amount field
+        sett_amount = (
+            settlement.get('settled_amount')
+            if settlement.get('settled_amount') is not None
+            else settlement.get('amount')
+        )
+        if sett_amount is None:
+            return False
+
+        # Counterpart must have at least one amount field
+        count_amount = (
+            counterpart.get('amount')
+            if counterpart.get('amount') is not None
+            else counterpart.get('expected_amount')
+        )
+        if count_amount is None:
+            return False
+
+        return True
+
+    def _deterministic_recheck(
+        self,
+        settlement: Optional[Dict],
+        counterpart: Optional[Dict],
+        exception_context: Optional[Dict] = None
+    ) -> bool:
+        """
         Re-verify an LLM-proposed match using deterministic rules.
-        
+
         WHY: The LLM can propose, but never commit. This is the core
         differentiator - we don't trust the LLM with unilateral authority
         over financial decisions.
-        
+
+        The first check is the counterpart-presence invariant: if the
+        settlement has no counterpart (bank or ledger leg is missing), the
+        recheck MUST return False regardless of LLM confidence. Missing legs
+        can never form a fully reconciled match.
+
+        Bank-leg requirement: A 3-way reconciliation requires settlement +
+        bank + ledger.  If the exception was raised because the bank leg was
+        absent (has_bank_leg=False in exception_context), then even a ledger-
+        side counterpart cannot satisfy the 3-way condition.  We reject.
+
         Returns:
             True if the deterministic re-check confirms the match
         """
-        if not settlement or not counterpart:
+        # ── INVARIANT GATE ────────────────────────────────────────────────
+        # Enforce: missing counterpart → never matched_llm_verified.
+        # This must be checked BEFORE any numeric comparison so that an
+        # orphan record with a None counterpart cannot accidentally pass.
+        if not self._all_required_counterparts_present(settlement, counterpart):
             return False
-        
+
+        # ── BANK LEG REQUIREMENT ──────────────────────────────────────────
+        # 3-way reconciliation: settlement + BANK + ledger are all required.
+        # If the exception record explicitly records has_bank_leg=False, the
+        # bank transaction was never present and the match cannot be confirmed.
+        if exception_context is not None:
+            has_bank_leg = exception_context.get('has_bank_leg')
+            if has_bank_leg is False:
+                # No bank leg confirmed — cannot satisfy 3-way requirement
+                return False
+
         # Extract amounts
         sett_amount = settlement.get('settled_amount') if settlement.get('settled_amount') is not None else settlement.get('amount')
         count_amount = counterpart.get('amount') if counterpart.get('amount') is not None else counterpart.get('expected_amount')
