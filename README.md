@@ -187,8 +187,8 @@ python run_pipeline.py --force-disagreement --records 56
 |---------------------|-------------|----------|
 | `RAZORPAY_KEY_ID` | Razorpay test-mode API key ID | No (falls back to sample batch) |
 | `RAZORPAY_KEY_SECRET` | Razorpay test-mode API secret | No (falls back to sample batch) |
-| `GROQ_API_KEY` | Groq API key for LLaMA 3.3 70B exception reasoning | No (LLM disabled if missing) |
-| `GROQ_MODEL` | Groq model identifier (default: `llama-3.3-70b-versatile`) | No |
+| `GROQ_API_KEY` | Groq API key for GPT-OSS 120B exception reasoning | No (LLM disabled if missing) |
+| `GROQ_MODEL` | Groq model identifier (default: `openai/gpt-oss-120b`, confirmed active 2026-09-04) | No |
 | `API_SECRET_KEY` | API key for FastAPI REST authentication | No (**demo default: `dev-secret-key`** — set in production; a startup warning is logged when unset) |
 
 ## Running Tests
@@ -216,11 +216,11 @@ to the metrics so this number is never silently assumed.
 | Metric | What It Means | Target |
 |--------|---------------|--------|
 | **Match Rate** | % of records successfully reconciled | >80% |
-| **Precision** | Of all matches, how many are correct (vs ground truth) | >90% |
-| **Recall** | Of all true matches, how many did we find | >75% |
+| **Precision** | Of verified matches, how many are correct against ground truth | Depends on run |
+| **Recall** | Of all true matches in ground truth, how many did we find | Depends on run |
 | **Disagreement Rate** | LLM vs deterministic conflicts | <10% |
 | **Unresolved Rate** | Exceptions needing human review | <5% |
-| **Ground-Truth Coverage** | Fraction of records that have a verified GT label | Should be 1.0 on a fresh run |
+| **Ground-Truth Coverage** | Fraction of the processed batch that has a verified ground-truth label (not coverage of the GT file) | 1.0 on a correctly-seeded run |
 
 ## Regenerating Metrics
 
@@ -230,11 +230,14 @@ numbers from scratch (same seed → same output):
 
 ```bash
 # Step 1: Rebuild ground truth and synthetic data (same seed as pipeline)
-python data/build_ground_truth.py --records 56 --seed 42
+# N=20 matches the 20 real settlements in data/settlements_live.csv.
+# Using a larger N generates unlabeled synthetic-only records and lowers
+# ground_truth_coverage below 1.0 — always use the same N in both commands.
+python data/build_ground_truth.py --records 20 --seed 42
 
 # Step 2: Run the full reconciliation pipeline
 #   (with LLM if GROQ_API_KEY is set, without otherwise)
-python run_pipeline.py --seed 42 --records 56
+python run_pipeline.py --seed 42 --records 20
 
 # Step 3: Inspect metrics  (also written to metrics/metrics_report.json)
 cat metrics_report.json
@@ -245,6 +248,8 @@ python -m metrics.evaluate --results results.json
 
 After a fresh run, `ground_truth_coverage` should be **1.0** because
 `build_ground_truth.py` generates a GT entry for every record in the batch.
+`ground_truth_coverage` measures the **fraction of the processed batch** that
+has a verified label, not merely utilization of the GT file.
 If you change `--records` or `--seed`, always re-run Step 1 first so the
 ground-truth file stays in sync.
 

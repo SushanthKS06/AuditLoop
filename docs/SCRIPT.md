@@ -13,10 +13,10 @@
 | :--- | :--- | :--- | :--- |
 | **0:00 - 0:45** | **The Industry Problem** | Split screen: Razorpay Recon CSV, Bank statement, ERP ledger | Reconciliation is an unmitigated nightmare of timing lags and MDR fee deductions. |
 | **0:45 - 1:30** | **The Architectural Thesis** | Architecture diagram | *The LLM proposes; deterministic verifier disposes.* Never trust an LLM with money. |
-| **1:30 - 3:00** | **Live Pipeline Demo** | Streamlit Dashboard & Terminal | Stage 1 ($O(N+M+L)$ hash match), Stage 2 (fuzzy fee scoring), Stage 3 (Groq LLaMA 3.3 structured reasoning). |
+| **1:30 - 3:00** | **Live Pipeline Demo** | Streamlit Dashboard & Terminal | Stage 1 ($O(N+M+L)$ hash match), Stage 2 (fuzzy fee scoring), Stage 3 (Groq GPT-OSS 120B structured reasoning). |
 | **3:00 - 3:45** | **Failure Recovery & Disagreements** | Disagreements Tab & HITL Form | Fail-closed demonstration: LLM hallucination caught and stopped cold. Maker-checker human sign-off. |
-| **3:45 - 4:30** | **Cryptographic Auditability & Metrics** | `/audit/verify` API & SHA-256 Tab | Mathematical tamper-evidence with SHA-256 block hashing; ground truth metrics ($>90\%$ precision). |
-| **4:30 - 5:00** | **Enterprise Scale & Closing** | API Docs & Terminal benchmarks | Scalable hash indexing, ~84% of records resolved at zero LLM cost, tamper-evident audit chain. |
+| **3:45 - 4:30** | **Cryptographic Auditability & Metrics** | `/audit/verify` API & SHA-256 Tab | Mathematical tamper-evidence with SHA-256 block hashing; ground truth metrics ($93.8\%$ precision). |
+| **4:30 - 5:00** | **Enterprise Scale & Closing** | API Docs & Terminal benchmarks | Scalable hash indexing, ~66.7% of records resolved at zero LLM cost, tamper-evident audit chain. |
 
 ---
 
@@ -59,7 +59,7 @@
 > 
 > Now let's open the AuditLoop Reviewer Dashboard.
 > Right at the top, we see our institutional metrics calculated mathematically against a known ground-truth answer key—not cherry-picked demo data.
-> We simply read the numbers live off the dashboard—typically demonstrating >95% precision and robust recall scores directly driven by the live reconciliation."*
+> We simply read the numbers live off the dashboard—typically demonstrating 93.8% precision and 88.2% recall scores directly driven by the live reconciliation."*
 
 ---
 
@@ -99,7 +99,7 @@
 
 > *"AuditLoop is packaged with a production-grade FastAPI REST API, a full automated test suite, and one-command Docker deployment.
 > 
-> By running deterministic matching first, ~**84%** of records are resolved at zero LLM cost — the LLM is only invoked on the unresolved tail. *(Computed from `match_rate` in `metrics_report.json`; methodology: records resolved at Stage 1/2 ÷ total records.)*
+> By running deterministic matching first, ~**66.7%** of records are resolved at zero LLM cost — the LLM is only invoked on the unresolved tail. *(Computed from `match_rate` in `metrics_report.json`; methodology: records resolved at Stage 1/2 ÷ total records.)*
 > 
 > AuditLoop bridges the gap between state-of-the-art Generative AI and the strict mathematical guarantees required by modern finance. Thank you."*
 

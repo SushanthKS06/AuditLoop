@@ -181,8 +181,12 @@ class TestStrictCoverageMode:
         assert metrics['unverified_count'] == 5, (
             f"Expected unverified_count=5, got {metrics['unverified_count']}"
         )
-        assert metrics['ground_truth_coverage'] == 1.0, (
-            f"Expected coverage == 1.0, got {metrics['ground_truth_coverage']}"
+        assert metrics['false_positives'] == 0
+        
+        # Coverage metric asserts
+        # We had 15 records, 10 had GT, 5 didn't. So coverage = 10/15 = 0.6667
+        assert metrics['ground_truth_coverage'] == 0.6667, (
+            f"Expected coverage == 0.6667, got {metrics['ground_truth_coverage']}"
         )
         assert metrics['coverage_mode'] == 'strict'
 
@@ -366,7 +370,42 @@ class TestStrictCoverageMode:
         metrics = evaluator.evaluate(results, output_path=None, coverage_mode="strict")
         
         # 2 GT records total, but only 1 unique GT record was mapped to.
-        # Coverage must be 0.5 (1/2), not 1.0 (2/2)
-        assert metrics['ground_truth_coverage'] == 0.5
+        # File utilization must be 0.5 (1/2).
+        # Batch coverage is 1.0 (2/2) since both results mapped to something in GT.
+        assert metrics['ground_truth_file_utilization'] == 0.5
+        assert metrics['ground_truth_coverage'] == 1.0
         assert metrics['duplicate_ground_truth_assignments'] == 1
         assert metrics['false_positives'] == 1  # The duplicate mapping is a false positive
+
+    def test_partial_batch_coverage_reports_correctly(self):
+        """
+        Verify that ground_truth_coverage correctly reports the fraction of the
+        processed batch that has labels, NOT just the utilization of the GT file.
+        """
+        evaluator = MetricsEvaluator()
+        
+        # evaluate() calls _load_ground_truth(), so we must patch that
+        def mock_load():
+            return [
+                {'payment_id': 'PAY_1', 'should_match': True},
+                {'payment_id': 'PAY_2', 'should_match': True},
+            ]
+        evaluator._load_ground_truth = mock_load
+        
+        # 5 results total. Only 2 have ground truth. 3 are unverified.
+        results = [
+            {'payment_id': 'PAY_1', 'final_status': 'matched'},
+            {'payment_id': 'PAY_2', 'final_status': 'matched'},
+            {'payment_id': 'PAY_3', 'final_status': 'matched'},
+            {'payment_id': 'PAY_4', 'final_status': 'exception'},
+            {'payment_id': 'PAY_5', 'final_status': 'llm_error'},
+        ]
+        
+        metrics = evaluator.evaluate(results, output_path=None, coverage_mode="strict")
+        
+        assert metrics['total_records'] == 5
+        assert metrics['unverified_count'] == 3
+        # Batch coverage = (5 - 3) / 5 = 2 / 5 = 0.4
+        assert metrics['ground_truth_coverage'] == 0.4
+        # File utilization = 2/2 = 1.0 (both GT entries were used)
+        assert metrics['ground_truth_file_utilization'] == 1.0

@@ -347,7 +347,7 @@ class TestClientRequestShape:
         call_kwargs = mock_groq_client.client.chat.completions.create.call_args
         # tool_choice must force explain_exception
         tool_choice = call_kwargs.kwargs.get("tool_choice") or call_kwargs[1].get("tool_choice")
-        assert tool_choice["function"]["name"] == "explain_exception"
+        assert tool_choice == "auto"
         assert result["valid"] is True
 
     def test_propose_resolution_calls_chat_completions(self, mock_groq_client):
@@ -367,7 +367,7 @@ class TestClientRequestShape:
 
         call_kwargs = mock_groq_client.client.chat.completions.create.call_args
         tool_choice = call_kwargs.kwargs.get("tool_choice") or call_kwargs[1].get("tool_choice")
-        assert tool_choice["function"]["name"] == "propose_resolution"
+        assert tool_choice == "auto"
         assert result["valid"] is True
 
     def test_explain_exception_uses_temperature_zero(self, mock_groq_client):
@@ -398,3 +398,162 @@ class TestClientRequestShape:
 
         assert result["valid"] is False
         assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# Task 1 Round 2 — Model string + tool_choice correctness
+# ---------------------------------------------------------------------------
+
+class TestModelIsNotDecommissioned:
+    """
+    Guard rail: ensure the dead llama-3.3-70b-versatile string is gone.
+    If this test fails it means someone reverted the model back to the
+    404-returning decommissioned model.
+    """
+
+    def test_default_model_is_not_dead_llama_string(self):
+        from llm.client import GroqClient
+        assert GroqClient.DEFAULT_MODEL != "llama-3.3-70b-versatile", (
+            "llama-3.3-70b-versatile was decommissioned by Groq on 2026-08-16. "
+            "DEFAULT_MODEL must be updated to an active model."
+        )
+
+    def test_default_model_is_expected_replacement(self):
+        """openai/gpt-oss-120b confirmed active on 2026-09-04."""
+        from llm.client import GroqClient
+        assert GroqClient.DEFAULT_MODEL == "openai/gpt-oss-120b"
+
+    def test_no_dead_model_string_in_module(self):
+        """Import the module source and grep for the decommissioned string."""
+        import inspect
+        import llm.client as client_module
+        source = inspect.getsource(client_module)
+        assert 'DEFAULT_MODEL = "llama-3.3-70b-versatile"' not in source, (
+            "Dead model string 'llama-3.3-70b-versatile' found assigned to DEFAULT_MODEL in llm/client.py source."
+        )
+
+
+class TestModelNotFoundSurfacesLoudly:
+    """
+    A 404/model_not_found error must raise RuntimeError immediately (not be
+    silently caught and returned as a per-record llm_parse_error).
+    """
+
+    def test_model_not_found_raises_runtime_error(self, mock_groq_client):
+        """model_not_found in error message → RuntimeError, not silent."""
+        def raise_404():
+            raise Exception(
+                "Error code: 404 - {'error': {'message': "
+                "'The model `llama-3.3-70b-versatile` does not exist or you do not have access to it.', "
+                "'type': 'invalid_request_error', 'code': 'model_not_found'}}"
+            )
+
+        with patch("time.sleep"):
+            with pytest.raises(RuntimeError, match="is not available"):
+                mock_groq_client._execute_with_retry(raise_404, max_retries=2)
+
+    def test_model_not_found_does_not_retry(self, mock_groq_client):
+        """A 404 must not be retried — it will always fail; retrying wastes time."""
+        counter = {"calls": 0}
+
+        def raise_404():
+            counter["calls"] += 1
+            raise Exception(
+                "404 - model does not exist or you do not have access to it"
+            )
+
+        with patch("time.sleep"):
+            with pytest.raises(RuntimeError):
+                mock_groq_client._execute_with_retry(raise_404, max_retries=3)
+
+        assert counter["calls"] == 1, (
+            f"Expected exactly 1 call (no retries on 404), got {counter['calls']}"
+        )
+
+    def test_explain_exception_propagates_model_not_found(self, mock_groq_client):
+        """
+        explain_exception catches generic exceptions and returns valid=False.
+        A model-not-found RuntimeError (already raised by _execute_with_retry)
+        must also produce valid=False with a meaningful error string.
+        """
+        with patch.object(
+            mock_groq_client,
+            "_execute_with_retry",
+            side_effect=RuntimeError(
+                "Configured Groq model 'llama-3.3-70b-versatile' is not available. "
+                "Check GROQ_MODEL env var and https://console.groq.com/docs/models"
+            )
+        ):
+            result = mock_groq_client.explain_exception(
+                record_a={"settled_amount": 1000.0}
+            )
+
+        assert result["valid"] is False
+        assert "not available" in result["error"] or "error" in result
+
+
+class TestToolChoiceIsAuto:
+    """
+    openai/gpt-oss-120b rejects forced tool_choice dicts with HTTP 400.
+    Verify that both explain_exception and propose_resolution use 'auto'.
+    """
+
+    def test_explain_exception_uses_auto_tool_choice(self, mock_groq_client):
+        mock_api_response = _build_mock_response("explain_exception", _valid_explain_args())
+        mock_groq_client.client.chat.completions.create.return_value = mock_api_response
+
+        with patch.object(mock_groq_client, "_execute_with_retry",
+                          side_effect=lambda fn, **kw: fn()):
+            mock_groq_client.explain_exception(
+                record_a={"settled_amount": 1000.0, "settled_at": "2026-09-01"}
+            )
+
+        call_kwargs = mock_groq_client.client.chat.completions.create.call_args
+        tool_choice = (
+            call_kwargs.kwargs.get("tool_choice")
+            or call_kwargs[1].get("tool_choice")
+        )
+        assert tool_choice == "auto", (
+            f"tool_choice must be 'auto' for openai/gpt-oss-120b compatibility, got: {tool_choice!r}"
+        )
+
+    def test_propose_resolution_uses_auto_tool_choice(self, mock_groq_client):
+        mock_api_response = _build_mock_response("propose_resolution", _valid_propose_args())
+        mock_groq_client.client.chat.completions.create.return_value = mock_api_response
+
+        with patch.object(mock_groq_client, "_execute_with_retry",
+                          side_effect=lambda fn, **kw: fn()):
+            mock_groq_client.propose_resolution(
+                record_a={"settled_amount": 1000.0, "settled_at": "2026-09-01"},
+                record_b={"amount": 1000.0, "value_date": "2026-09-01"},
+            )
+
+        call_kwargs = mock_groq_client.client.chat.completions.create.call_args
+        tool_choice = (
+            call_kwargs.kwargs.get("tool_choice")
+            or call_kwargs[1].get("tool_choice")
+        )
+        assert tool_choice == "auto", (
+            f"tool_choice must be 'auto' for openai/gpt-oss-120b compatibility, got: {tool_choice!r}"
+        )
+
+    def test_tool_choice_is_not_forced_function_dict(self, mock_groq_client):
+        """Forced dict format causes HTTP 400 on openai/gpt-oss-120b \u2014 must not appear."""
+        mock_api_response = _build_mock_response("explain_exception", _valid_explain_args())
+        mock_groq_client.client.chat.completions.create.return_value = mock_api_response
+
+        with patch.object(mock_groq_client, "_execute_with_retry",
+                          side_effect=lambda fn, **kw: fn()):
+            mock_groq_client.explain_exception(
+                record_a={"settled_amount": 1000.0, "settled_at": "2026-09-01"}
+            )
+
+        call_kwargs = mock_groq_client.client.chat.completions.create.call_args
+        tool_choice = (
+            call_kwargs.kwargs.get("tool_choice")
+            or call_kwargs[1].get("tool_choice")
+        )
+        assert not isinstance(tool_choice, dict), (
+            "tool_choice must not be a dict (forced function) \u2014 "
+            "openai/gpt-oss-120b returns HTTP 400 for forced tool_choice dicts."
+        )

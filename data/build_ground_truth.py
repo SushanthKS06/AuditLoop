@@ -52,6 +52,20 @@ def build_ground_truth(
     if os.path.exists(settlements_path):
         settlements_df = pd.read_csv(settlements_path)
         print(f"Loaded {len(settlements_df)} settlements from {settlements_path}")
+
+        # Guard: if requested records exceed the settlements snapshot, the
+        # generator pads with fully-synthetic rows that share no link to real
+        # Razorpay settlement IDs.  Those rows still get ground-truth entries
+        # (so coverage stays 1.0), but the resulting batch exceeds what the
+        # live CSV can verify.  Warn loudly so the caller can make an informed
+        # choice rather than silently accepting padded data.
+        if num_records > len(settlements_df):
+            print(
+                f"\n[WARN] --records {num_records} exceeds the "
+                f"{len(settlements_df)}-row settlements snapshot. "
+                f"Extra records will be fully synthetic (no real Razorpay link). "
+                f"For 100% real-data coverage use --records {len(settlements_df)}."
+            )
     else:
         print(f"No settlements file at {settlements_path} — generating fully synthetic data.")
 
@@ -75,8 +89,8 @@ def main():
             "Always use the same --records and --seed as your pipeline run."
         )
     )
-    parser.add_argument("--records", type=int, default=80,
-                        help="Number of records to generate (default: 80)")
+    parser.add_argument("--records", type=int, default=20,
+                        help="Number of records to generate (default: 20, matches settlements_live.csv)")
     parser.add_argument("--seed", type=int, default=42,
                         help="Random seed for reproducibility (default: 42)")
     parser.add_argument("--messiness", type=float, default=0.25,

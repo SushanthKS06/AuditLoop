@@ -3,6 +3,17 @@ Groq API Client with Function/Tool Calling
 
 Wraps the Groq SDK with strict Pydantic schema validation.
 Fail closed on any parse error or timeout.
+
+Model notes (updated 2026-09-04)
+---------------------------------
+The original model (llama-3.3-70b-versatile) was decommissioned by Groq on
+2026-08-16 and returns HTTP 404.  The replacement is openai/gpt-oss-120b,
+which supports function calling with tool_choice='auto'.
+
+Important: openai/gpt-oss-120b does NOT honour forced tool_choice
+(tool_choice={'type': 'function', 'function': {'name': 'X'}}) — the Groq
+API returns HTTP 400 with 'tool_use_failed'.  Use tool_choice='auto' and
+strengthen the system prompt to guarantee the function is called.
 """
 
 import os
@@ -40,13 +51,15 @@ class GroqClient:
     Any response that fails Pydantic validation is rejected (fail-closed).
     """
     
-    DEFAULT_MODEL = "llama-3.3-70b-versatile"
-    
+    # openai/gpt-oss-120b: confirmed active on 2026-09-04, supports function
+    # calling with tool_choice='auto'.  Override via GROQ_MODEL env var.
+    DEFAULT_MODEL = "openai/gpt-oss-120b"
+
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         """
         Args:
             api_key: Groq API key (defaults to GROQ_API_KEY env var)
-            model: Model to use (defaults to GROQ_MODEL env var or llama-3.3-70b-versatile)
+            model: Model to use (defaults to GROQ_MODEL env var or openai/gpt-oss-120b)
         """
         self.api_key = api_key or os.getenv("GROQ_API_KEY")
         self.model = model or os.getenv("GROQ_MODEL") or self.DEFAULT_MODEL
@@ -119,6 +132,9 @@ class GroqClient:
                 }
             }
             
+            # tool_choice='auto' required — forced function dict causes HTTP 400
+            # on openai/gpt-oss-120b.  The system prompt instructs the model to
+            # always call explain_exception, so 'auto' is effectively forced.
             response = self._execute_with_retry(
                 lambda: self.client.chat.completions.create(
                     model=self.model,
@@ -127,7 +143,7 @@ class GroqClient:
                         {"role": "user", "content": user_prompt}
                     ],
                     tools=[tool_schema],
-                    tool_choice={"type": "function", "function": {"name": "explain_exception"}},
+                    tool_choice="auto",
                     temperature=0.0,
                     max_tokens=600,
                     timeout=30.0
@@ -192,6 +208,7 @@ class GroqClient:
                 }
             }
             
+            # tool_choice='auto' — see explain_exception for rationale
             response = self._execute_with_retry(
                 lambda: self.client.chat.completions.create(
                     model=self.model,
@@ -200,7 +217,7 @@ class GroqClient:
                         {"role": "user", "content": user_prompt}
                     ],
                     tools=[tool_schema],
-                    tool_choice={"type": "function", "function": {"name": "propose_resolution"}},
+                    tool_choice="auto",
                     temperature=0.0,
                     max_tokens=600,
                     timeout=30.0
@@ -213,7 +230,12 @@ class GroqClient:
             return {"valid": False, "error": str(e)}
             
     def _execute_with_retry(self, api_callable, max_retries: int = 4):
-        """Execute Groq API call with exponential backoff on transient network failures."""
+        """Execute Groq API call with exponential backoff on transient network failures.
+
+        Raises RuntimeError immediately (no retry) when the configured model is
+        not found — retrying a 404 is pointless and the error must be visible
+        in server logs rather than silently buried in per-record llm_parse_error.
+        """
         last_err = None
         for attempt in range(max_retries + 1):
             try:
@@ -221,6 +243,25 @@ class GroqClient:
             except Exception as e:
                 last_err = e
                 err_msg = str(e).lower()
+
+                # Model-not-found is a hard configuration error — surface loudly
+                # and immediately instead of silently degrading to llm_parse_error.
+                if "model_not_found" in err_msg or (
+                    "404" in err_msg and "does not exist" in err_msg
+                ):
+                    import logging as _log
+                    _log.getLogger(__name__).error(
+                        "Groq model '%s' is not available (HTTP 404). "
+                        "Update GROQ_MODEL env var. "
+                        "Current models: https://console.groq.com/docs/models",
+                        self.model
+                    )
+                    raise RuntimeError(
+                        f"Configured Groq model '{self.model}' is not available. "
+                        f"Check GROQ_MODEL env var and "
+                        f"https://console.groq.com/docs/models"
+                    ) from e
+
                 if attempt < max_retries:
                     delay = max(2.0, 1.5 * (2 ** attempt))
                     if "429" in err_msg or "rate limit" in err_msg:

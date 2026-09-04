@@ -230,8 +230,22 @@ class MetricsEvaluator:
             else 0.0
         )
 
+        # ground_truth_coverage: fraction of the BATCH that has a verified label.
+        # Formula: (total_records - unverified_count) / total_records
+        #
+        # Previous formula was len(used_gt_ids) / len(self.ground_truth) which
+        # measured GT-file utilization, not batch coverage.  That reported 1.0
+        # even when 56% of the batch was unlabeled (a misleading "all covered"
+        # reading when in fact most records had no ground-truth entry).
+        #
+        # ground_truth_file_utilization retains the old metric for internal use.
         ground_truth_coverage = (
-            round(len(used_gt_ids) / len(self.ground_truth), 4) if len(self.ground_truth) > 0 else 0.0
+            round((total_recs - unverified_count) / total_recs, 4)
+            if total_recs > 0 else 0.0
+        )
+        ground_truth_file_utilization = (
+            round(len(used_gt_ids) / len(self.ground_truth), 4)
+            if len(self.ground_truth) > 0 else 0.0
         )
 
         metrics: Dict[str, Any] = {
@@ -244,10 +258,15 @@ class MetricsEvaluator:
             'unresolved_count': unresolved_count,
             # ── Coverage ─────────────────────────────────────────────────
             'coverage_mode': coverage_mode,
+            # Fraction of the processed BATCH with a verified GT label.
+            # = (total_records - unverified_count) / total_records
             'ground_truth_coverage': ground_truth_coverage,
             'unverified_count': unverified_count,
             'duplicate_ground_truth_assignments': duplicate_ground_truth_assignments,
             'ground_truth_unique_evaluated': len(used_gt_ids),
+            # Fraction of the GT *file* whose entries were matched to results.
+            # Renamed from old "ground_truth_coverage" to prevent confusion.
+            'ground_truth_file_utilization': ground_truth_file_utilization,
             # ── Verified metrics (precision/recall/F1/FPR) ───────────────
             'match_rate': round(match_rate, 4),
             'precision': round(precision, 4),
