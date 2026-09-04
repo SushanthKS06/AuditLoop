@@ -13,11 +13,13 @@ INVARIANT 7: messiness_ratio=0.0 produces near-zero exception rate.
 INVARIANT 8: messiness_ratio=1.0 produces near-100% exception rate.
 """
 
+import json
 import pytest
 from unittest.mock import MagicMock, patch
 from engine.exceptions import ExceptionDispatcher
 from llm.privacy import sanitize_record_for_llm, sanitize_text
 from metrics.evaluate import MetricsEvaluator
+from engine.states import ReconciliationState
 
 
 # ── INVARIANT 1 ─────────────────────────────────────────────────────────────
@@ -177,7 +179,7 @@ class TestInvariant2LLMCannotBypassVerification:
         results = dispatcher.process_exceptions([exception])
         assert len(results) == 1
         status = results[0]['final_status']
-        assert status == 'matched_llm_verified', (
+        assert status == ReconciliationState.MATCHED_LLM_VERIFIED.value, (
             f"Valid fee-adjusted pair should produce matched_llm_verified, got '{status}'."
         )
         assert results[0]['deterministic_recheck_passed'] is True
@@ -194,12 +196,12 @@ class TestInvariant3DisagreementPreserved:
         evaluator.ground_truth = []  # No GT — all records go to unverified in strict mode
 
         results = [
-            {'payment_id': 'PAY_D1', 'final_status': 'llm_deterministic_disagreement'},
-            {'payment_id': 'PAY_D2', 'final_status': 'llm_deterministic_disagreement'},
-            {'payment_id': 'PAY_D3', 'final_status': 'matched'},
+            {'payment_id': 'PAY_D1', 'type': 'settlement', 'final_status': ReconciliationState.LLM_DETERMINISTIC_DISAGREEMENT.value},
+            {'payment_id': 'PAY_D2', 'type': 'settlement', 'final_status': ReconciliationState.LLM_DETERMINISTIC_DISAGREEMENT.value},
+            {'payment_id': 'PAY_D3', 'type': 'settlement', 'final_status': ReconciliationState.EXACT_MATCH.value},
         ]
 
-        metrics = evaluator.evaluate(results, output_path=None, coverage_mode='strict')
+        metrics = evaluator.evaluate(results, output_path=None)
 
         assert metrics['disagreement_count'] == 2, (
             f"Expected 2 disagreements counted, got {metrics['disagreement_count']}."
@@ -294,7 +296,7 @@ class TestInvariant5DemoCasesTagged:
             "Demo case must be tagged with forced_demo_case=True "
             "so it can be excluded from organic metrics."
         )
-        assert result['final_status'] == 'llm_deterministic_disagreement'
+        assert result['final_status'] == ReconciliationState.LLM_DETERMINISTIC_DISAGREEMENT.value
 
 
 # ── INVARIANT 6 ─────────────────────────────────────────────────────────────
@@ -309,21 +311,21 @@ class TestInvariant6MetricsNeverImpossible:
         with open(gt_path, 'w') as f:
             json.dump(gt, f)
         evaluator = MetricsEvaluator(ground_truth_path=str(gt_path))
-        return evaluator.evaluate(results, output_path=None, coverage_mode='strict')
+        return evaluator.evaluate(results, output_path=None)
 
     def test_precision_between_0_and_1(self, tmp_path):
-        results = [{'payment_id': f'P{i}', 'final_status': 'matched'} for i in range(20)]
+        results = [{'payment_id': f'P{i}', 'type': 'settlement', 'final_status': ReconciliationState.EXACT_MATCH.value} for i in range(20)]
         metrics = self._evaluate_n_results(tmp_path, results)
         assert 0.0 <= metrics['precision'] <= 1.0, f"precision={metrics['precision']} out of [0,1]"
 
     def test_recall_between_0_and_1(self, tmp_path):
-        results = [{'payment_id': f'P{i}', 'final_status': 'matched'} for i in range(20)]
+        results = [{'payment_id': f'P{i}', 'type': 'settlement', 'final_status': ReconciliationState.EXACT_MATCH.value} for i in range(20)]
         metrics = self._evaluate_n_results(tmp_path, results)
         assert 0.0 <= metrics['recall'] <= 1.0, f"recall={metrics['recall']} out of [0,1]"
 
     def test_match_rate_between_0_and_1(self, tmp_path):
-        results = [{'payment_id': f'P{i}', 'final_status': 'matched'} for i in range(10)]
-        results += [{'payment_id': f'E{i}', 'final_status': 'unresolved_exception'} for i in range(10)]
+        results = [{'payment_id': f'P{i}', 'type': 'settlement', 'final_status': ReconciliationState.EXACT_MATCH.value} for i in range(10)]
+        results += [{'payment_id': f'E{i}', 'type': 'settlement', 'final_status': ReconciliationState.UNRESOLVED_EXCEPTION.value} for i in range(10)]
         metrics = self._evaluate_n_results(tmp_path, results)
         assert 0.0 <= metrics['match_rate'] <= 1.0, f"match_rate={metrics['match_rate']} out of [0,1]"
 
@@ -342,8 +344,8 @@ class TestInvariant6MetricsNeverImpossible:
              'root_cause': 'exact_match', 'notes': '', 'messiness_type': 'exact_match'}
         ]
         results = [
-            {'payment_id': 'PAY_GT_001', 'final_status': 'matched'},
-            {'payment_id': 'PAY_NO_GT', 'final_status': 'matched'},
+            {'payment_id': 'PAY_GT_001', 'type': 'settlement', 'final_status': ReconciliationState.EXACT_MATCH.value},
+            {'payment_id': 'PAY_NO_GT', 'type': 'settlement', 'final_status': ReconciliationState.EXACT_MATCH.value},
         ]
         metrics = self._evaluate_n_results(tmp_path, results, gt_entries)
         assert 0.0 <= metrics['ground_truth_coverage'] <= 1.0

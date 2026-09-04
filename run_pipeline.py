@@ -32,6 +32,7 @@ from data.fetch_settlements import RazorpayReconClient
 from data.generate_data import SyntheticDataGenerator
 from engine.matcher import DeterministicMatcher
 from engine.exceptions import ExceptionDispatcher
+from engine.states import ReconciliationState
 from llm.client import create_client
 from audit.store import AuditStore
 from metrics.evaluate import MetricsEvaluator
@@ -178,7 +179,7 @@ class ReconciliationPipeline:
                     **row.get('settlement', {}),
                     'match_type': 'exact',
                     'confidence': 1.0,
-                    'final_status': 'matched',
+                    'final_status': ReconciliationState.EXACT_MATCH.value,
                     'source': src,
                     'forced_demo_case': False
                 }
@@ -203,7 +204,7 @@ class ReconciliationPipeline:
                     **row.get('settlement', {}),
                     'match_type': row.get('match_type'),
                     'confidence': row.get('confidence'),
-                    'final_status': 'matched',
+                    'final_status': ReconciliationState.FUZZY_MATCH.value,
                     'source': src,
                     'forced_demo_case': False
                 }
@@ -235,12 +236,12 @@ class ReconciliationPipeline:
                 self.all_results.append(exc)
                 
                 # Count LLM-verified matches
-                if exc.get('final_status') == 'matched_llm_verified':
+                if exc.get('final_status') == ReconciliationState.MATCHED_LLM_VERIFIED.value:
                     self.all_matches.append({
                         **exc.get('settlement', {}),
                         'match_type': 'llm_verified',
                         'confidence': exc.get('llm_confidence'),
-                        'final_status': 'matched_llm_verified',
+                        'final_status': ReconciliationState.MATCHED_LLM_VERIFIED.value,
                         'source': exc['source'],
                         'forced_demo_case': False
                     })
@@ -251,15 +252,14 @@ class ReconciliationPipeline:
                 status = exc.get('final_status', 'unknown')
                 status_counts[status] = status_counts.get(status, 0) + 1
             
-            print("  Exception outcomes:")
-            for status, count in status_counts.items():
-                print(f"    - {status}: {count}")
+            if status_counts:
+                for status, count in status_counts.items():
+                    print(f"    - {status}: {count}")
         else:
-            # No LLM - mark all exceptions as unresolved
+            # If no LLM, just add exceptions to results
             for exc in exceptions:
-                exc['final_status'] = 'unresolved_exception'
                 exc['source'] = exc.get('source') or (exc.get('settlement') or {}).get('source') or (exc.get('counterpart') or {}).get('source') or 'synthetic'
-                exc['forced_demo_case'] = False
+                exc['final_status'] = ReconciliationState.UNRESOLVED_EXCEPTION.value
                 self.all_results.append(exc)
             print("  LLM disabled - all exceptions marked unresolved")
         
@@ -316,11 +316,10 @@ class ReconciliationPipeline:
             json.dump(self.all_results, f, indent=2, default=str)
         print(f"  Results saved to {results_path}")
         
-        # Step 5: Compute metrics (always strict — no silent self-grading)
+        # Step 5: Computing metrics
         print("\n[Step 5] Computing metrics...")
         metrics = self.evaluator.evaluate(
-            self.all_results,
-            coverage_mode="strict"
+            results=self.all_results
         )
         self.evaluator.print_summary(metrics)
         

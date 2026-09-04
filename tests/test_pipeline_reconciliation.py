@@ -347,11 +347,17 @@ class TestPipelineReconciliation:
 
 
 
-        reported_total = metrics.get('total_records', -1)
+        transactions = metrics.get('total_input_transactions', 0)
+
+        orphans = metrics.get('orphan_bank_records', 0) + metrics.get('orphan_ledger_records', 0)
+
+        reported_total = transactions + orphans
+
+
 
         assert reported_total == len(all_results), (
 
-            f"metrics.total_records ({reported_total}) != len(all_results) "
+            f"metrics total ({reported_total}) != len(all_results) "
 
             f"({len(all_results)}). Pipeline is scoring a different list than it saved."
 

@@ -17,6 +17,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional
 import threading
+from engine.states import ReconciliationState
 
 
 class ExceptionDispatcher:
@@ -131,11 +132,11 @@ class ExceptionDispatcher:
             'llm_proposal_reasoning': None,
             'deterministic_recheck_passed': None,
             'llm_error_detail': None,
-            'final_status': 'unresolved_exception'
+            'final_status': ReconciliationState.UNRESOLVED_EXCEPTION.value
         }
         
         if not self.llm_client:
-            result['final_status'] = 'llm_unavailable'
+            result['final_status'] = ReconciliationState.LLM_UNAVAILABLE.value
             return result
         
         try:
@@ -146,7 +147,7 @@ class ExceptionDispatcher:
             )
             
             if not explanation_result or not explanation_result.get('valid'):
-                result['final_status'] = 'llm_parse_error'
+                result['final_status'] = ReconciliationState.LLM_PARSE_ERROR.value
                 result['llm_error_detail'] = explanation_result.get('error', 'Unknown explanation error') if explanation_result else 'Null explanation result'
                 return result
             
@@ -176,27 +177,27 @@ class ExceptionDispatcher:
                         result['deterministic_recheck_passed'] = recheck_passed
                         
                         if recheck_passed:
-                            result['final_status'] = 'matched_llm_verified'
+                            result['final_status'] = ReconciliationState.MATCHED_LLM_VERIFIED.value
                         else:
-                            result['final_status'] = 'llm_deterministic_disagreement'
+                            result['final_status'] = ReconciliationState.LLM_DETERMINISTIC_DISAGREEMENT.value
                     elif proposal_result.get('action') == 'flag_for_human':
-                        result['final_status'] = 'flagged_for_review'
+                        result['final_status'] = ReconciliationState.FLAGGED_FOR_REVIEW.value
                     elif proposal_result.get('action') == 'reject_duplicate':
-                        result['final_status'] = 'rejected_duplicate'
+                        result['final_status'] = ReconciliationState.REJECTED_DUPLICATE.value
                     else:
-                        result['final_status'] = 'unresolved_exception'
+                        result['final_status'] = ReconciliationState.UNRESOLVED_EXCEPTION.value
                 else:
-                    result['final_status'] = 'llm_parse_error'
+                    result['final_status'] = ReconciliationState.LLM_PARSE_ERROR.value
                     result['llm_error_detail'] = proposal_result.get('error', 'Unknown proposal error') if proposal_result else 'Null proposal result'
             else:
                 # No counterpart to compare - can only explain, not resolve
                 if explanation_result.get('confidence', 0) >= 0.8:
-                    result['final_status'] = 'explained_no_resolution'
+                    result['final_status'] = ReconciliationState.EXPLAINED_NO_RESOLUTION.value
                 else:
-                    result['final_status'] = 'unresolved_exception'
+                    result['final_status'] = ReconciliationState.UNRESOLVED_EXCEPTION.value
         
         except Exception as e:
-            result['final_status'] = 'llm_parse_error'
+            result['final_status'] = ReconciliationState.LLM_PARSE_ERROR.value
             result['llm_error_detail'] = str(e)
         
         return result
@@ -218,7 +219,7 @@ class ExceptionDispatcher:
             'llm_proposed_action': 'match',
             'llm_proposal_reasoning': 'Records appear to represent the same underlying transaction with minor discrepancies.',
             'deterministic_recheck_passed': False,  # Deliberate disagreement
-            'final_status': 'llm_deterministic_disagreement',
+            'final_status': ReconciliationState.LLM_DETERMINISTIC_DISAGREEMENT.value,
             'forced_demo_case': True
         }
         

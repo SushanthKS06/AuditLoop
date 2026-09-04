@@ -11,9 +11,7 @@ deterministically before it counts. A strict 3-way reconciliation invariant
 Every decision, matched or not, is logged to a tamper-evident cryptographic audit trail. 
 Accuracy is measured against a known ground-truth batch, not demoed on cherry-picked examples.
 
-Settlements data is pulled live from Razorpay's test-mode Settlement Recon
-API; bank statement and ledger data are synthetic (clearly tagged where
-used) since no equivalent sandbox exists for those.
+All data (settlements, bank statement, and ledger) used in this repository's default benchmark is fully synthetic for reproducibility and data privacy. No live API keys are required to execute the evaluation suite.
 
 ## Project Structure
 
@@ -69,7 +67,7 @@ Pydantic schemas) · Razorpay API · SQLite (SHA-256 Chained) · Streamlit · py
 
 ## API Endpoints (Prototype)
 
-AuditLoop exposes a prototype REST API for programmatic access and institutional compliance:
+AuditLoop exposes a REST API for programmatic access and institutional compliance:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|

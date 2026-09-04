@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple, Any
 import pandas as pd
 from rapidfuzz import fuzz
+from engine.states import ReconciliationState
 
 
 class DeterministicMatcher:
@@ -654,7 +655,7 @@ class DeterministicMatcher:
                     isinstance(row.get('bank'), dict) and not row.get('bank')
                 )
                 exceptions.append({
-                    'type': 'low_confidence',
+                    'type': ReconciliationState.LOW_CONFIDENCE.value,
                     'record_ids': rec_id,
                     'settlement': sett,
                     'counterpart': count,
@@ -670,7 +671,7 @@ class DeterministicMatcher:
             for _, row in unmatched_settlements.iterrows():
                 r = row.to_dict()
                 exceptions.append({
-                    'type': 'unmatched_settlement',
+                    'type': ReconciliationState.UNMATCHED_SETTLEMENT.value,
                     'record_ids': str(r.get('entity_id') or r.get('payment_id') or r.get('settlement_id') or ''),
                     'settlement': r,
                     'counterpart': None,
@@ -685,7 +686,7 @@ class DeterministicMatcher:
             for _, row in unmatched_bank.iterrows():
                 r = row.to_dict()
                 exceptions.append({
-                    'type': 'unmatched_bank',
+                    'type': ReconciliationState.UNMATCHED_BANK.value,
                     'record_ids': str(r.get('txn_id') or r.get('utr') or ''),
                     'settlement': None,
                     'counterpart': r,
@@ -700,7 +701,7 @@ class DeterministicMatcher:
             for _, row in unmatched_ledger.iterrows():
                 r = row.to_dict()
                 exceptions.append({
-                    'type': 'unmatched_ledger',
+                    'type': ReconciliationState.UNMATCHED_LEDGER.value,
                     'record_ids': str(r.get('order_id') or r.get('payment_id') or r.get('customer_ref') or ''),
                     'settlement': None,
                     'counterpart': r,

@@ -1,10 +1,10 @@
 """
-Deterministic Adversarial Benchmark Test (25/25 target)
+Deterministic Adversarial Benchmark Test (30/30 target)
 
-Runs all 25 adversarial benchmark cases through the full pipeline
+Runs all 30 adversarial benchmark cases through the full pipeline
 using a MockLLMClient — no external API calls, fully reproducible.
 
-Expected: 25/25 cases pass.
+Expected: 30/30 cases pass.
 
 Cases covered:
 - case_1:  Exact 3-way match (UTR + payment_id + amount)
@@ -130,7 +130,7 @@ def _statuses_match(expected: str, actual: str) -> bool:
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 class TestAdversarialBenchmarkDeterministic:
-    """Run all 25 benchmark cases with MockLLMClient — no API calls required."""
+    """Run all 30 benchmark cases with MockLLMClient — no API calls required."""
 
     @pytest.fixture(autouse=True)
     def chdir_to_project(self, tmp_path, monkeypatch):
@@ -144,7 +144,7 @@ class TestAdversarialBenchmarkDeterministic:
         On failure, the report lists every case that failed.
         """
         cases = _load_benchmark()
-        assert len(cases) == 25, f"Expected 25 benchmark cases, found {len(cases)}"
+        assert len(cases) == 30, f"Expected 30 benchmark cases, found {len(cases)}"
 
         failures = []
         for case in cases:
@@ -186,6 +186,11 @@ class TestAdversarialBenchmarkDeterministic:
         ("case_5_formatting",      "matched"),
         ("case_6_rounding",        "matched"),
         ("case_7_strict_disagree", "llm_deterministic_disagreement"),
+        ("case_26_prompt_injection", "matched"),
+        ("case_27_accounting_negative", "llm_deterministic_disagreement"),
+        ("case_28_missing_both", "explained_no_resolution"),
+        ("case_29_pii_leak", "matched"),
+        ("case_30_strict_disagree_ledger", "llm_deterministic_disagreement"),
     ])
     def test_named_case(self, case_id, expected_status):
         """Individual test for each named (non-generic) adversarial case."""

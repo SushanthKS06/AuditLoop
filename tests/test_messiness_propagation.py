@@ -10,6 +10,7 @@ is received at the API but a hardcoded default is used downstream.
 
 import pytest
 from data.generate_data import SyntheticDataGenerator
+from engine.states import ReconciliationState
 
 
 class TestMessinessPropagation:
@@ -120,7 +121,10 @@ class TestMessinessPropagation:
         )
         # With messiness=0.0, all records should be exact_match → should resolve to matched
         results = result.get('results', [])
-        exceptions = [r for r in results if r.get('final_status') not in ('matched', 'matched_llm_verified')]
+        exceptions = [r for r in results if r.get('final_status') not in (
+            ReconciliationState.EXACT_MATCH.value,
+            ReconciliationState.MATCHED_LLM_VERIFIED.value
+        )]
         exception_rate = len(exceptions) / len(results) if results else 0
 
         assert exception_rate < 0.20, (

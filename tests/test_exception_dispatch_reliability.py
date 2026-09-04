@@ -18,6 +18,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from engine.exceptions import ExceptionDispatcher
+from engine.states import ReconciliationState
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +163,7 @@ class TestLLMErrorHandling:
         results = dispatcher.process_exceptions(exceptions, concurrent=False)
 
         assert len(results) == 1
-        assert results[0]["final_status"] == "llm_parse_error"
+        assert results[0]["final_status"] == ReconciliationState.LLM_PARSE_ERROR.value
 
     def test_explain_exception_returns_invalid_gives_parse_error(self):
         """explain_exception returning valid=False → final_status='llm_parse_error'."""
@@ -175,7 +176,7 @@ class TestLLMErrorHandling:
         exceptions = [_make_exception(0)]
         results = dispatcher.process_exceptions(exceptions, concurrent=False)
 
-        assert results[0]["final_status"] == "llm_parse_error"
+        assert results[0]["final_status"] == ReconciliationState.LLM_PARSE_ERROR.value
         assert "llm_error_detail" in results[0]
 
     def test_batch_continues_after_single_record_error(self):
@@ -211,8 +212,8 @@ class TestLLMErrorHandling:
 
         assert len(results) == 3
         # First must be parse error; others must not be
-        assert results[0]["final_status"] == "llm_parse_error"
-        assert results[1]["final_status"] != "llm_parse_error"
+        assert results[0]["final_status"] == ReconciliationState.LLM_PARSE_ERROR.value
+        assert results[1]["final_status"] != ReconciliationState.LLM_PARSE_ERROR.value
 
     def test_no_llm_client_gives_unavailable_status(self):
         """Without a client every record gets final_status='llm_unavailable'."""
@@ -220,7 +221,7 @@ class TestLLMErrorHandling:
         exceptions = [_make_exception(i) for i in range(3)]
         results = dispatcher.process_exceptions(exceptions, concurrent=False)
         for res in results:
-            assert res["final_status"] == "llm_unavailable"
+            assert res["final_status"] == ReconciliationState.LLM_UNAVAILABLE.value
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +332,7 @@ class TestForceDisagreementCase:
 
         disagreements = [
             r for r in results
-            if r.get("final_status") == "llm_deterministic_disagreement"
+            if r.get("final_status") == ReconciliationState.LLM_DETERMINISTIC_DISAGREEMENT.value
         ]
         assert len(disagreements) == 1, (
             f"Expected exactly 1 disagreement, got {len(disagreements)}"
@@ -348,7 +349,7 @@ class TestForceDisagreementCase:
 
         disagreements = [
             r for r in results
-            if r.get("final_status") == "llm_deterministic_disagreement"
+            if r.get("final_status") == ReconciliationState.LLM_DETERMINISTIC_DISAGREEMENT.value
         ]
         assert disagreements[0].get("forced_demo_case") is True
 
@@ -370,7 +371,7 @@ class TestForceDisagreementCase:
         assert len(forced_results) == 1
         # All real results must not be contaminated
         for r in real_results:
-            assert r.get("final_status") != "llm_deterministic_disagreement" or \
+            assert r.get("final_status") != ReconciliationState.LLM_DETERMINISTIC_DISAGREEMENT.value or \
                    not r.get("forced_demo_case"), (
                 "A non-forced record was incorrectly marked as disagreement "
                 "due to contamination from the injected case"
