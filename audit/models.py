@@ -1,7 +1,7 @@
 """
 Audit Trail Models
 
-Pydantic models representing immutable audit log entries, decision records,
+Pydantic models representing tamper-evident audit log entries, decision records,
 and summary metrics for the reconciliation lifecycle.
 """
 
@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 class AuditEntry(BaseModel):
     """
-    Representation of an immutable decision logged to the audit trail with cryptographic hash chaining.
+    Representation of a tamper-evident decision logged to the audit trail with cryptographic hash chaining.
     """
     model_config = ConfigDict(from_attributes=True)
     

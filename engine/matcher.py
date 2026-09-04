@@ -20,8 +20,8 @@ class DeterministicMatcher:
     """
     Two-stage deterministic matching engine.
     
-    Stage 1: Exact match on normalized keys (UTR, order_id, payment_id)
-    Stage 2: Fuzzy match with fee awareness and configurable thresholds
+    Stage 1: Exact match on normalized keys (UTR, order_id, payment_id). Complexity O(N + M + L) via hash indexing.
+    Stage 2: Candidate-scored fuzzy match with fee awareness. Worst-case complexity O(NM + NL).
     
     Design decision: LLM is NEVER called here. It only sees exceptions
     from Stage 3 (unmatched or low-confidence records).
@@ -143,7 +143,7 @@ class DeterministicMatcher:
         """
         Stage 1: Exact match via high-performance hash join on normalized keys.
         
-        Complexity: O(N + M) utilizing hash lookups rather than nested DataFrame filters.
+        Complexity: O(N + M + L) utilizing hash lookups rather than nested DataFrame filters.
         
         Priority matching keys:
         1. UTR (settlement_utr <-> utr)
@@ -321,7 +321,8 @@ class DeterministicMatcher:
         ledger: pd.DataFrame
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, List[Dict]]:
         """
-        Stage 2: Fuzzy match with fee awareness, scoring, and candidate indexing.
+        Stage 2: Candidate-scored fuzzy matching for unresolved records.
+        Worst-case complexity: O(NM + NL), with practical reduction through filtering.
         
         Scoring factors:
         - Amount delta percentage or fee-deducted match (weight: 0.4)
@@ -508,11 +509,8 @@ class DeterministicMatcher:
             # Net settlement + explicit fee matches gross ledger amount exactly
             amount_score = 0.98
             fee_rule_triggered = True
-        elif is_ledger and (1.5 <= amount_diff_pct <= 3.5):
-            # Standard MDR fee deduction range (2% + 18% GST = 2.36%)
-            amount_score = 0.92
-            fee_rule_triggered = True
         elif amount_diff_pct <= 5.0:
+            # Only allow sliding scale if within 5% (penalized heavily)
             amount_score = max(0.0, 1.0 - (amount_diff_pct - self.amount_threshold_pct) / 5.0)
         else:
             amount_score = 0.0

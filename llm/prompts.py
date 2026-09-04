@@ -2,7 +2,7 @@ from typing import Optional, Dict, Any
 from .privacy import sanitize_record_for_llm
 
 EXPLAIN_EXCEPTION_SYSTEM = """You are an expert financial reconciliation controller analyzing reconciliation exceptions.
-Your job is to perform step-by-step deduction (thought_process) and identify the ROOT CAUSE of why two records couldn't be matched deterministically.
+Your job is to perform step-by-step deduction (structured_reasoning) and identify the ROOT CAUSE of why two records couldn't be matched deterministically.
 
 You will receive:
 - A settlement record from Razorpay
@@ -18,7 +18,7 @@ Classify the root cause into ONE of these categories:
 - "unclassified": None of the above clearly apply
 
 Respond with:
-1. thought_process: Step-by-step mathematical and temporal deduction
+1. structured_reasoning: Step-by-step mathematical and temporal deduction
 2. root_cause: The category that best fits
 3. explanation: Brief explanation citing specific field differences
 4. confidence: Your confidence 0-1"""
@@ -42,7 +42,7 @@ CRITICAL RULES:
 4. Your proposal will be re-verified deterministically before any match is committed
 
 Respond with:
-1. thought_process: Step-by-step analysis comparing amount, date, and identifiers
+1. structured_reasoning: Step-by-step analysis comparing amount, date, and identifiers
 2. action: Your proposed resolution
 3. confidence: Your confidence 0-1
 4. reasoning: Justification citing specific fields"""
@@ -51,29 +51,29 @@ Respond with:
 def get_contextual_exemplar(settlement: Optional[Dict], counterpart: Optional[Dict]) -> str:
     """Dynamically select the most relevant few-shot exemplar based on record features."""
     if not settlement or not counterpart:
-        return "Reference Exemplar (Orphan Record):\nSettlement exists with no counterpart in bank/ledger.\nThought Process: Single unlinked transaction.\nClassification: root_cause='no_counterpart', confidence=0.95"
+        return "Reference Exemplar (Orphan Record):\nSettlement exists with no counterpart in bank/ledger.\nStructured Reasoning: Single unlinked transaction.\nClassification: root_cause='no_counterpart', confidence=0.95"
     
     sett_amt = float(settlement.get('settled_amount') or settlement.get('amount') or 0)
     count_amt = float(counterpart.get('amount') or counterpart.get('expected_amount') or 0)
     
     # 1. High value detection
     if max(sett_amt, count_amt) >= 50000:
-        return "Reference Exemplar (High-Value Transaction):\nRecords: Amount is 150,000 INR with slight date divergence.\nThought Process: Exceeds automated match risk ceiling. Human reviewer sign-off required.\nProposal: action='flag_for_human', confidence=0.88"
+        return "Reference Exemplar (High-Value Transaction):\nRecords: Amount is 150,000 INR with slight date divergence.\nStructured Reasoning: Exceeds automated match risk ceiling. Human reviewer sign-off required.\nProposal: action='flag_for_human', confidence=0.88"
         
     # 2. Fee / Rounding detection (1% to 4% delta)
     if sett_amt > 0 and count_amt > 0:
         diff_pct = abs(sett_amt - count_amt) / max(sett_amt, count_amt) * 100
         if 1.0 <= diff_pct <= 4.0:
-            return "Reference Exemplar (MDR Fee Deduction):\nSettlement: amount=976.40, fee=23.60 | Ledger: expected_amount=1000.00\nThought Process: Net settlement 976.40 plus fee 23.60 matches gross amount 1000.00 (2% MDR + 18% GST).\nClassification: root_cause='rounding', action='match', confidence=0.95"
+            return "Reference Exemplar (MDR Fee Deduction):\nSettlement: amount=976.40, fee=23.60 | Ledger: expected_amount=1000.00\nStructured Reasoning: Net settlement 976.40 plus fee 23.60 matches gross amount 1000.00 (2% MDR + 18% GST).\nClassification: root_cause='rounding', action='match', confidence=0.95"
             
     # 3. Duplicate suspicion (identical amount, conflicting IDs)
     sett_order = str(settlement.get('order_id') or '')
     count_order = str(counterpart.get('order_id') or counterpart.get('narration') or '')
     if abs(sett_amt - count_amt) < 0.01 and sett_order and count_order and sett_order not in count_order:
-        return "Reference Exemplar (Duplicate Suspicion):\nSettlement: amount=4500.00, order_id=ORD_101 | Bank: amount=4500.00, narration='ORD_999'\nThought Process: Amounts match but references refer to conflicting order IDs.\nClassification: root_cause='duplicate_suspected', action='reject_duplicate', confidence=0.90"
+        return "Reference Exemplar (Duplicate Suspicion):\nSettlement: amount=4500.00, order_id=ORD_101 | Bank: amount=4500.00, narration='ORD_999'\nStructured Reasoning: Amounts match but references refer to conflicting order IDs.\nClassification: root_cause='duplicate_suspected', action='reject_duplicate', confidence=0.90"
         
     # Default: settlement lag
-    return "Reference Exemplar (Settlement Lag):\nSettlement: created_at=2026-09-03 | Bank: value_date=2026-09-01\nThought Process: Bank value date precedes settlement date by 2 days, matching standard T+2 Indian banking cycle.\nClassification: root_cause='timing_lag', confidence=0.90"
+    return "Reference Exemplar (Settlement Lag):\nSettlement: created_at=2026-09-03 | Bank: value_date=2026-09-01\nStructured Reasoning: Bank value date precedes settlement date by 2 days, matching standard T+2 Indian banking cycle.\nClassification: root_cause='timing_lag', confidence=0.90"
 
 
 def build_explain_prompt(settlement: dict, counterpart: dict = None) -> str:
@@ -94,7 +94,7 @@ Analyze this exception:
 
 {count_str}
 
-Perform step-by-step reasoning (thought_process) and determine the root cause."""
+Perform step-by-step reasoning (structured_reasoning) and determine the root cause."""
 
 
 def build_propose_prompt(settlement: dict, counterpart: dict) -> str:
@@ -115,7 +115,7 @@ Propose a resolution for these records:
 
 {count_str}
 
-Perform step-by-step reasoning (thought_process) and propose an action."""
+Perform step-by-step reasoning (structured_reasoning) and propose an action."""
 
 
 def _format_record(record: dict, label: str) -> str:

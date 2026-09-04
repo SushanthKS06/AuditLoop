@@ -91,7 +91,7 @@ class GroqClient:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "thought_process": {
+                            "structured_reasoning": {
                                 "type": "string",
                                 "description": "Step-by-step deduction comparing amounts, dates, fees, and references"
                             },
@@ -114,7 +114,7 @@ class GroqClient:
                                 "description": "Confidence score between 0 and 1"
                             }
                         },
-                        "required": ["thought_process", "root_cause", "explanation", "confidence"]
+                        "required": ["structured_reasoning", "root_cause", "explanation", "confidence"]
                     }
                 }
             }
@@ -168,7 +168,7 @@ class GroqClient:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "thought_process": {
+                            "structured_reasoning": {
                                 "type": "string",
                                 "description": "Chain-of-thought analysis verifying amount delta, date lag, and reference correlation"
                             },
@@ -187,7 +187,7 @@ class GroqClient:
                                 "description": "Justification for the proposed action"
                             }
                         },
-                        "required": ["thought_process", "action", "confidence", "reasoning"]
+                        "required": ["structured_reasoning", "action", "confidence", "reasoning"]
                     }
                 }
             }

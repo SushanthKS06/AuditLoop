@@ -123,7 +123,7 @@ def run_reconciliation(request: ReconcileRequest):
     
     Pipeline Steps:
     1. Ingestion / Data generation with realistic messiness
-    2. Stage 1: Exact matching on normalized UTR / Order ID / Payment ID (O(N+M))
+    2. Stage 1: Exact matching on normalized UTR / Order ID / Payment ID (O(N+M+L))
     3. Stage 2: Fuzzy matching with MDR fee-deduction awareness
     4. Stage 3: LLM exception explanation & proposal generation with CoT & PII masking
     5. Deterministic re-verification of all LLM match proposals (fail-closed)
@@ -217,7 +217,7 @@ async def get_recent_audit_entries(
     status: Optional[str] = Query(None, description="Filter by final status (e.g. matched, llm_deterministic_disagreement)")
 ):
     """
-    Get recent entries from the immutable SQLite audit log.
+    Get recent entries from the tamper-evident SQLite audit log.
     Supports optional status filtering and pagination limit.
     """
     store = AuditStore()

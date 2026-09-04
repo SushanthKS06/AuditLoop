@@ -13,10 +13,10 @@
 | :--- | :--- | :--- | :--- |
 | **0:00 - 0:45** | **The Industry Problem** | Split screen: Razorpay Recon CSV, Bank statement, ERP ledger | Reconciliation is an unmitigated nightmare of timing lags and MDR fee deductions. |
 | **0:45 - 1:30** | **The Architectural Thesis** | Architecture diagram | *The LLM proposes; deterministic verifier disposes.* Never trust an LLM with money. |
-| **1:30 - 3:00** | **Live Pipeline Demo** | Streamlit Dashboard & Terminal | Stage 1 ($O(N+M)$ hash match), Stage 2 (fuzzy fee scoring), Stage 3 (Groq LLaMA 3.3 CoT + PII sanitization). |
+| **1:30 - 3:00** | **Live Pipeline Demo** | Streamlit Dashboard & Terminal | Stage 1 ($O(N+M+L)$ hash match), Stage 2 (fuzzy fee scoring), Stage 3 (Groq LLaMA 3.3 structured reasoning). |
 | **3:00 - 3:45** | **Failure Recovery & Disagreements** | Disagreements Tab & HITL Form | Fail-closed demonstration: LLM hallucination caught and stopped cold. Maker-checker human sign-off. |
 | **3:45 - 4:30** | **Cryptographic Auditability & Metrics** | `/audit/verify` API & SHA-256 Tab | Mathematical tamper-evidence with SHA-256 block hashing; ground truth metrics ($>90\%$ precision). |
-| **4:30 - 5:00** | **Enterprise Scale & Closing** | API Docs & Terminal benchmarks | 10,000 txns/sec, 92% token cost reduction, SOC2/RBI audit-ready. |
+| **4:30 - 5:00** | **Enterprise Scale & Closing** | API Docs & Terminal benchmarks | Scalable hash indexing, 92% token cost reduction, SOC2/RBI audit-ready. |
 
 ---
 
@@ -42,7 +42,7 @@
 > Therefore, in AuditLoop, **an LLM is never given the final say on a financial match.**  
 > 
 > We engineered a 3-stage pipeline:
-> - **Stage 1**: Vectorized exact hash-join on normalized UTRs, order IDs, and payment IDs in $O(N+M)$ time.
+> - **Stage 1**: Vectorized exact hash-join on normalized UTRs, order IDs, and payment IDs in $O(N+M+L)$ time.
 > - **Stage 2**: Deterministic fuzzy matching with MDR fee deduction awareness and date proximity scoring.
 > - **Stage 3**: For remaining unresolved exceptions, LLaMA 3.3 analyzes the root cause with step-by-step Chain-of-Thought and PII redaction.
 > 
@@ -97,7 +97,7 @@
 
 > *"AuditLoop is packaged with a production-grade FastAPI REST API, a 39-test automated test suite passing in under 8 seconds, and one-command Docker deployment.
 > 
-> By running deterministic matching first, we cut LLM API costs by **92%** while processing up to **10,000 records per second**.
+> By running deterministic matching first, we cut LLM API costs by **92%** and scale linearly with indexed inputs.
 > 
 > AuditLoop bridges the gap between state-of-the-art Generative AI and the strict mathematical guarantees required by modern finance. Thank you."*
 
@@ -112,4 +112,4 @@
 > **Answer:** *"Our privacy layer (`llm/privacy.py`) intercepts all exception records before prompt serialization. It scrubs emails, Indian phone numbers (`+91[6-9]...`), and customer names with regex and token masking, passing only sanitized structural keys (UTRs, amounts, timestamps, and order IDs) to the external LLM."*
 
 ### Q3: "Why not use an off-the-shelf vector database for matching?"
-> **Answer:** *"Vector databases compute cosine distance over text embeddings, which is great for semantic search but dangerous for numerical reconciliation. Cosine similarity cannot determine whether 976.40 + 23.60 equals 1000.00. Our deterministic engine uses exact hash tables and arithmetic fee equations, which are mathematically exact, zero-cost, and $1000\times$ faster."*
+> **Answer:** *"Vector databases compute cosine distance over text embeddings, which is great for semantic search but dangerous for numerical reconciliation. Cosine similarity cannot determine whether 976.40 + 23.60 equals 1000.00. Our deterministic engine uses exact hash tables and arithmetic fee equations, which are mathematically exact, zero-cost, and computationally efficient."*

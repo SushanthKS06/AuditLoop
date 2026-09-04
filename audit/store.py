@@ -2,7 +2,7 @@
 Audit Trail Models and Storage
 
 Append-only SQLite audit log with SHA-256 cryptographic hash chaining.
-Every decision, matched or not, leaves an immutable, tamper-evident record.
+Every decision, matched or not, leaves a tamper-evident record.
 Never mutate rows - only append new records.
 """
 
@@ -104,10 +104,12 @@ class AuditStore:
         decision: str,
         rule_fired: Optional[str],
         confidence: Optional[float],
-        final_status: Optional[str]
+        final_status: Optional[str],
+        match_type: Optional[str] = None,
+        llm_reasoning: Optional[str] = None
     ) -> str:
         """Compute SHA-256 hash for cryptographic block chaining."""
-        payload = f"{previous_hash}|{timestamp}|{record_ids}|{stage}|{decision}|{rule_fired or ''}|{confidence or ''}|{final_status or ''}"
+        payload = f"{previous_hash}|{timestamp}|{record_ids}|{stage}|{decision}|{rule_fired or ''}|{confidence or ''}|{final_status or ''}|{match_type or ''}|{llm_reasoning or ''}"
         return hashlib.sha256(payload.encode('utf-8')).hexdigest()
     
     def append(self, record: Dict[str, Any]) -> int:
@@ -144,7 +146,9 @@ class AuditStore:
                 decision=decision,
                 rule_fired=rule_fired,
                 confidence=confidence,
-                final_status=final_status
+                final_status=final_status,
+                match_type=match_type,
+                llm_reasoning=llm_reasoning
             )
             
             cursor = conn.execute("""
@@ -201,7 +205,9 @@ class AuditStore:
                     decision=row['decision'],
                     rule_fired=row['rule_fired'],
                     confidence=row['confidence'],
-                    final_status=row['final_status']
+                    final_status=row['final_status'],
+                    match_type=row.get('match_type'),
+                    llm_reasoning=row.get('llm_reasoning')
                 )
                 
                 if computed_hash != stored_hash:
@@ -342,6 +348,13 @@ class AuditStore:
         Returns:
             Dict containing inserted audit record info and chain integrity status
         """
+        if not reviewer_id or str(reviewer_id).strip().lower().startswith('system'):
+            raise ValueError("Invalid reviewer_id: Must be a distinct human controller.")
+            
+        history = self.get_record_history(record_ids)
+        if any(entry.get('stage') == 'stage4_human_resolution' for entry in history):
+            raise ValueError("Duplicate resolution: Record has already been resolved.")
+            
         audit_entry = {
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'record_ids': record_ids,

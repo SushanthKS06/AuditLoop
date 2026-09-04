@@ -19,7 +19,7 @@ class ExplainExceptionResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "thought_process": "Evaluating amount delta: Settlement amount is 980, counterpart is 1000. Difference is 20 (2%), which matches standard MDR fee. Dates are within 1 day.",
+                "structured_reasoning": "Evaluating amount delta: Settlement amount is 980, counterpart is 1000. Difference is 20 (2%), which matches standard MDR fee. Dates are within 1 day.",
                 "root_cause": "timing_lag",
                 "explanation": "The settlement shows a date 2 days after the bank transaction, which is within normal T+2 settlement windows for UPI transactions in India.",
                 "confidence": 0.87
@@ -27,7 +27,7 @@ class ExplainExceptionResponse(BaseModel):
         }
     )
     
-    thought_process: str = Field(
+    structured_reasoning: str = Field(
         ...,
         min_length=10,
         max_length=2000,
@@ -70,7 +70,7 @@ class ProposeResolutionResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "thought_process": "Comparing records: Settlement UTR matches counterpart reference. Fee deduction explains the 2% difference. Amount and date criteria satisfy deterministic recheck.",
+                "structured_reasoning": "Comparing records: Settlement UTR matches counterpart reference. Fee deduction explains the 2% difference. Amount and date criteria satisfy deterministic recheck.",
                 "action": "match",
                 "confidence": 0.91,
                 "reasoning": "Despite the 1.2% amount difference, the UTR matches exactly and the date difference is within normal settlement lag. This appears to be a fee deduction case."
@@ -78,7 +78,7 @@ class ProposeResolutionResponse(BaseModel):
         }
     )
     
-    thought_process: str = Field(
+    structured_reasoning: str = Field(
         ...,
         min_length=10,
         max_length=2000,

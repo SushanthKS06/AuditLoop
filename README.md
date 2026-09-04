@@ -26,7 +26,7 @@ auditloop/
 │   ├── ground_truth.json        # Answer key for measuring precision/recall
 │   └── sample_batch/            # Committed example batch (runs with zero API keys)
 ├── engine/
-│   ├── matcher.py               # Vectorized exact + fuzzy matching (Stage 1 & 2 O(N+M))
+│   ├── matcher.py               # Vectorized exact + fuzzy matching (Stage 1 O(N+M+L), Stage 2 O(NM+NL))
 │   └── exceptions.py            # Stage 3 — dispatch unresolved records to the LLM
 ├── llm/
 │   ├── client.py                 # Groq API wrapper with function calling & retry backoff

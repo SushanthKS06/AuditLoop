@@ -117,6 +117,9 @@ class MetricsEvaluator:
         disagreement_count = 0
         unresolved_count = 0
         unverified_count = 0   # Records with no GT entry (strict mode skips these)
+        
+        used_gt_ids = set()
+        duplicate_ground_truth_assignments = 0
 
         for result in results:
             final_status = result.get('final_status', '')
@@ -129,7 +132,13 @@ class MetricsEvaluator:
 
             if gt:
                 # ── Ground-truth-verified record ──────────────────────────
-                should_match = gt.get('should_match', True)
+                gt_id = id(gt)
+                if gt_id in used_gt_ids:
+                    duplicate_ground_truth_assignments += 1
+                    should_match = False  # Penalize duplicate mappings
+                else:
+                    used_gt_ids.add(gt_id)
+                    should_match = gt.get('should_match', True)
 
                 if is_matched:
                     matched_count += 1
@@ -237,6 +246,8 @@ class MetricsEvaluator:
             'coverage_mode': coverage_mode,
             'ground_truth_coverage': ground_truth_coverage,
             'unverified_count': unverified_count,
+            'duplicate_ground_truth_assignments': duplicate_ground_truth_assignments,
+            'ground_truth_unique_evaluated': len(used_gt_ids),
             # ── Verified metrics (precision/recall/F1/FPR) ───────────────
             'match_rate': round(match_rate, 4),
             'precision': round(precision, 4),

@@ -2,7 +2,7 @@
 Performance & Scalability Benchmark Test.
 
 Verifies that Stage 1 and Stage 2 matching scale efficiently on 500+ records
-with O(N+M) complexity.
+with O(N+M+L) complexity.
 """
 
 import time

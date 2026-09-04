@@ -67,7 +67,7 @@ def sanitize_record_for_llm(record: Optional[Dict[str, Any]]) -> Optional[Dict[s
             continue
         
         # Redact specific PII fields
-        if k in ('customer_name', 'email', 'phone', 'contact'):
+        if k in ('customer_name', 'email', 'phone', 'contact', 'vpa', 'upi_id', 'upi_handle'):
             clean[k] = "[REDACTED_PII]"
         elif k == 'customer_ref':
             clean[k] = "CUST_[REDACTED]"
