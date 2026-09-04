@@ -40,3 +40,9 @@ metrics/metrics_report.json
 results.json
 All_Results.csv
 Audit_Hash_Chain.csv
+
+# Runtime directory (generated at container/pipeline start — never commit)
+runtime/
+
+# SQLite databases (generated at runtime)
+*.db

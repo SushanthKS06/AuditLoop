@@ -6,14 +6,19 @@ services:
     volumes:
       - ./data:/app/data
       - ./metrics:/app/metrics
-      - ./results.json:/app/results.json
-      - ./audit_trail.db:/app/audit_trail.db
+      - ./runtime:/app/runtime
       - ./.env:/app/.env:ro
     environment:
       - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-}
       - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-}
+      - AUDIT_DB_PATH=/app/runtime/audit_trail.db
+      - RESULTS_PATH=/app/runtime/results.json
+      - METRICS_PATH=/app/runtime/metrics_report.json
+      - API_SECRET_KEY=${API_SECRET_KEY:-dev-secret-key}
+      - ENV=${ENV:-development}
+      - DEMO_MODE=${DEMO_MODE:-true}
     command: python run_pipeline.py --force-disagreement --records 20
     profiles:
       - run
@@ -25,9 +30,12 @@ services:
     volumes:
       - ./data:/app/data
       - ./metrics:/app/metrics
-      - ./audit_trail.db:/app/audit_trail.db
+      - ./runtime:/app/runtime
     environment:
       - PYTHONUNBUFFERED=1
+      - AUDIT_DB_PATH=/app/runtime/audit_trail.db
+      - RESULTS_PATH=/app/runtime/results.json
+      - METRICS_PATH=/app/runtime/metrics_report.json
     command: streamlit run dashboard/app.py --server.address=0.0.0.0 --server.port=8501
     depends_on:
       - pipeline
@@ -42,14 +50,19 @@ services:
     volumes:
       - ./data:/app/data
       - ./metrics:/app/metrics
-      - ./results.json:/app/results.json
-      - ./audit_trail.db:/app/audit_trail.db
+      - ./runtime:/app/runtime
       - ./.env:/app/.env:ro
     environment:
       - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-}
       - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-}
+      - AUDIT_DB_PATH=/app/runtime/audit_trail.db
+      - RESULTS_PATH=/app/runtime/results.json
+      - METRICS_PATH=/app/runtime/metrics_report.json
+      - API_SECRET_KEY=${API_SECRET_KEY:-dev-secret-key}
+      - ENV=${ENV:-development}
+      - DEMO_MODE=${DEMO_MODE:-true}
       - PYTHONUNBUFFERED=1
     # Run pipeline first, then start dashboard and API server
     command: >
@@ -66,12 +79,19 @@ services:
     volumes:
       - ./data:/app/data
       - ./metrics:/app/metrics
+      - ./runtime:/app/runtime
       - ./.env:/app/.env:ro
     environment:
       - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-}
       - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-}
+      - AUDIT_DB_PATH=/app/runtime/audit_trail.db
+      - RESULTS_PATH=/app/runtime/results.json
+      - METRICS_PATH=/app/runtime/metrics_report.json
+      - API_SECRET_KEY=${API_SECRET_KEY:-dev-secret-key}
+      - ENV=${ENV:-development}
+      - DEMO_MODE=${DEMO_MODE:-true}
       - PYTHONUNBUFFERED=1
     command: uvicorn api.app:app --host 0.0.0.0 --port 8000
     profiles:

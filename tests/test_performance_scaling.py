@@ -33,7 +33,7 @@ class TestPerformanceScaling:
         )
         stage1_duration = time.perf_counter() - start_time
         
-        # Stage 1 on 500 records with vectorized hash joins should complete in < 0.25 seconds
+        # Stage 1 on 500 records with vectorized hash joins should complete in < 0.5 seconds
         assert stage1_duration < 0.5, f"Stage 1 took too long: {stage1_duration:.3f}s"
         assert len(matched_stage1) > 0
         

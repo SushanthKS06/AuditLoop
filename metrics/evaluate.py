@@ -309,6 +309,16 @@ class MetricsEvaluator:
             except Exception:
                 pass
 
+            # Sync to METRICS_PATH if configured in environment
+            metrics_env = os.getenv("METRICS_PATH")
+            if metrics_env and metrics_env not in (output_path, "metrics_report.json"):
+                try:
+                    os.makedirs(os.path.dirname(metrics_env) or '.', exist_ok=True)
+                    with open(metrics_env, 'w') as f:
+                        json.dump(metrics, f, indent=2)
+                except Exception:
+                    pass
+
         return metrics
 
     @staticmethod

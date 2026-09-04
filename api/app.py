@@ -14,6 +14,7 @@ import logging
 import os
 import sys
 import json
+import secrets
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -26,10 +27,39 @@ from audit.store import AuditStore
 from audit.models import AuditEntry, AuditSummaryStats, HumanResolutionRequest, HumanResolutionResponse
 from metrics.evaluate import MetricsEvaluator
 
+from contextlib import asynccontextmanager
+
+def validate_security_configuration():
+    """
+    Strict environment validation:
+    In production or when DEMO_MODE is disabled, reject missing or default dev secret keys.
+    """
+    env = os.getenv("ENV", "development").strip().lower()
+    demo_mode = os.getenv("DEMO_MODE", "true").strip().lower()
+    is_production = env == "production" or demo_mode in ("false", "0", "no")
+    secret_key = os.getenv("API_SECRET_KEY")
+
+    if is_production:
+        if not secret_key or secret_key.strip() == "dev-secret-key":
+            raise RuntimeError(
+                "CRITICAL SECURITY CONFIGURATION ERROR: Production deployment (or DEMO_MODE=false) "
+                "requires API_SECRET_KEY to be set and not use default credentials ('dev-secret-key')."
+            )
+
+# Run security validation at module load
+validate_security_configuration()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Verify security configuration on server startup."""
+    validate_security_configuration()
+    yield
+
 app = FastAPI(
     title="AuditLoop Reconciliation API",
     description="Prototype REST API for multi-source financial reconciliation with deterministic-first matching, fee awareness, and LLM-assisted exception handling.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # CORS configuration
@@ -50,9 +80,7 @@ app.add_middleware(
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=True)
 
-# Warn loudly if running with the insecure demo default — should be
-# immediately visible in container/server logs so it reads as an
-# intentional, disclosed choice rather than an oversight.
+# Warn loudly if running with the insecure demo default in development mode
 if not os.getenv("API_SECRET_KEY"):
     logger.warning(
         "API_SECRET_KEY not set — using insecure default key 'dev-secret-key'. "
@@ -61,7 +89,7 @@ if not os.getenv("API_SECRET_KEY"):
 
 async def get_api_key(api_key: str = Security(api_key_header)):
     expected_key = os.getenv("API_SECRET_KEY", "dev-secret-key")
-    if api_key != expected_key:
+    if not secrets.compare_digest(api_key, expected_key):
         raise HTTPException(
             status_code=403,
             detail="Could not validate API KEY"
@@ -111,6 +139,7 @@ class HealthResponse(BaseModel):
     timestamp: str
     deterministic_engine: str = "active"
     audit_store: str = "sqlite_wal"
+    llm_status: str = "connected"
 
 
 @app.get("/health", response_model=HealthResponse, dependencies=[Depends(get_api_key)])
@@ -118,11 +147,20 @@ async def health_check():
     """
     Health check endpoint.
     Returns service health, version, and component status.
+    Decoupled from LLM availability: returns status='healthy' (HTTP 200) as long as
+    the core deterministic matching engine and SQLite audit store are operational,
+    with llm_status indicating LLM connectivity/configuration status.
     """
+    llm_key = os.getenv("GROQ_API_KEY")
+    llm_status = "connected" if llm_key and len(llm_key.strip()) > 5 else "not_configured"
+
     return HealthResponse(
         status="healthy",
         version="1.0.0",
-        timestamp=datetime.now(timezone.utc).isoformat()
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        deterministic_engine="active",
+        audit_store="sqlite_wal",
+        llm_status=llm_status
     )
 
 
@@ -207,10 +245,14 @@ async def get_latest_metrics():
     """
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
-    paths_to_check = [
+    paths_to_check = []
+    env_metrics = os.getenv("METRICS_PATH")
+    if env_metrics:
+        paths_to_check.append(env_metrics)
+    paths_to_check.extend([
         os.path.join(base_dir, "metrics", "metrics_report.json"),
         os.path.join(base_dir, "metrics_report.json")
-    ]
+    ])
     
     for p in paths_to_check:
         if os.path.exists(p):
@@ -274,7 +316,12 @@ def resolve_audit_exception(request: HumanResolutionRequest):
     """
     Human-in-the-Loop Maker-Checker endpoint.
     Allows an authorized financial controller to manually resolve a flagged exception or disagreement.
-    The decision is immutably appended to the SHA-256 chained audit trail with cryptographic proof.
+    
+    NOTE ON ATTRIBUTION:
+    reviewer_id is an attribution display label supplied in the request body for audit trail
+    logging and human review assignment, NOT an authenticated cryptographic identity.
+    
+    The decision is appended to the SHA-256 chained audit trail with cryptographic tamper-evidence.
     """
     store = AuditStore()
     try:

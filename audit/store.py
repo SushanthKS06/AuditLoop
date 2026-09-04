@@ -8,6 +8,7 @@ Never mutate rows - only append new records.
 
 import sqlite3
 import hashlib
+import os
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from contextlib import contextmanager
@@ -29,12 +30,12 @@ class AuditStore:
     
     GENESIS_HASH = "0" * 64
     
-    def __init__(self, db_path: str = "audit_trail.db"):
+    def __init__(self, db_path: Optional[str] = None):
         """
         Args:
-            db_path: Path to SQLite database file
+            db_path: Path to SQLite database file. Defaults to AUDIT_DB_PATH env var or 'audit_trail.db'.
         """
-        self.db_path = db_path
+        self.db_path = db_path or os.getenv("AUDIT_DB_PATH", "audit_trail.db")
         self._init_db()
     
     @contextmanager
@@ -64,6 +65,8 @@ class AuditStore:
                     match_type TEXT,
                     llm_reasoning TEXT,
                     final_status TEXT,
+                    source TEXT DEFAULT 'synthetic',
+                    forced_demo_case INTEGER DEFAULT 0,
                     previous_hash TEXT,
                     record_hash TEXT
                 )
@@ -76,6 +79,10 @@ class AuditStore:
                 conn.execute("ALTER TABLE audit_log ADD COLUMN previous_hash TEXT")
             if 'record_hash' not in columns:
                 conn.execute("ALTER TABLE audit_log ADD COLUMN record_hash TEXT")
+            if 'source' not in columns:
+                conn.execute("ALTER TABLE audit_log ADD COLUMN source TEXT DEFAULT 'synthetic'")
+            if 'forced_demo_case' not in columns:
+                conn.execute("ALTER TABLE audit_log ADD COLUMN forced_demo_case INTEGER DEFAULT 0")
             
             # Create index for querying by record_ids
             conn.execute("""
@@ -108,10 +115,14 @@ class AuditStore:
         confidence: Optional[float],
         final_status: Optional[str],
         match_type: Optional[str] = None,
-        llm_reasoning: Optional[str] = None
+        llm_reasoning: Optional[str] = None,
+        source: Optional[str] = "synthetic",
+        forced_demo_case: Optional[int] = 0
     ) -> str:
         """Compute SHA-256 hash for cryptographic block chaining."""
-        payload = f"{previous_hash}|{timestamp}|{record_ids}|{stage}|{decision}|{rule_fired or ''}|{confidence or ''}|{final_status or ''}|{match_type or ''}|{llm_reasoning or ''}"
+        src_val = source or "synthetic"
+        forced_val = 1 if forced_demo_case else 0
+        payload = f"{previous_hash}|{timestamp}|{record_ids}|{stage}|{decision}|{rule_fired or ''}|{confidence or ''}|{final_status or ''}|{match_type or ''}|{llm_reasoning or ''}|{src_val}|{forced_val}"
         return hashlib.sha256(payload.encode('utf-8')).hexdigest()
     
     def append(self, record: Dict[str, Any]) -> int:
@@ -139,6 +150,8 @@ class AuditStore:
             match_type = record.get('match_type')
             llm_reasoning = record.get('llm_reasoning')
             final_status = record.get('final_status') or decision
+            source = record.get('source') or 'synthetic'
+            forced_demo_case = 1 if record.get('forced_demo_case') else 0
             
             record_hash = self._compute_hash(
                 previous_hash=previous_hash,
@@ -150,19 +163,21 @@ class AuditStore:
                 confidence=confidence,
                 final_status=final_status,
                 match_type=match_type,
-                llm_reasoning=llm_reasoning
+                llm_reasoning=llm_reasoning,
+                source=source,
+                forced_demo_case=forced_demo_case
             )
             
             cursor = conn.execute("""
                 INSERT INTO audit_log (
                     timestamp, record_ids, stage, rule_fired, 
                     confidence, decision, match_type, llm_reasoning, final_status,
-                    previous_hash, record_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    source, forced_demo_case, previous_hash, record_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 timestamp, record_ids, stage, rule_fired,
                 confidence, decision, match_type, llm_reasoning, final_status,
-                previous_hash, record_hash
+                source, forced_demo_case, previous_hash, record_hash
             ))
             conn.commit()
             return cursor.lastrowid
@@ -209,7 +224,9 @@ class AuditStore:
                     confidence=row['confidence'],
                     final_status=row['final_status'],
                     match_type=row.get('match_type'),
-                    llm_reasoning=row.get('llm_reasoning')
+                    llm_reasoning=row.get('llm_reasoning'),
+                    source=row.get('source'),
+                    forced_demo_case=row.get('forced_demo_case')
                 )
                 
                 if computed_hash != stored_hash:
@@ -341,9 +358,14 @@ class AuditStore:
         """
         Record a human reviewer's manual resolution into the cryptographically chained audit log.
         
+        NOTE ON ATTRIBUTION:
+        reviewer_id is an attribution display label (e.g. employee/controller ID) supplied
+        in the resolution request for human review assignment and auditable record keeping,
+        NOT an authenticated cryptographic identity.
+        
         Args:
             record_ids: Identifier pair being resolved
-            reviewer_id: User/employee ID of reviewer
+            reviewer_id: Attribution display label for reviewer (e.g. employee/controller ID)
             decision: Outcome ('human_approved_match', 'human_rejected_duplicate', 'human_written_off')
             notes: Auditable explanation for compliance
             
@@ -357,6 +379,15 @@ class AuditStore:
         if any(entry.get('stage') == 'stage4_human_resolution' for entry in history):
             raise ValueError("Duplicate resolution: Record has already been resolved.")
             
+        source = 'synthetic'
+        forced_demo_case = False
+        if history:
+            for h in history:
+                if h.get('source'):
+                    source = h['source']
+                if h.get('forced_demo_case'):
+                    forced_demo_case = bool(h['forced_demo_case'])
+
         audit_entry = {
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'record_ids': record_ids,
@@ -366,7 +397,9 @@ class AuditStore:
             'decision': decision,
             'match_type': 'human_resolved',
             'llm_reasoning': f"Reviewer [{reviewer_id}] Notes: {notes}",
-            'final_status': decision
+            'final_status': decision,
+            'source': source,
+            'forced_demo_case': forced_demo_case
         }
         
         inserted_id = self.append(audit_entry)

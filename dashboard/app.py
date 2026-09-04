@@ -10,6 +10,7 @@ Shows:
 import os
 import sys
 import json
+from typing import Optional, List, Dict
 import pandas as pd
 import streamlit as st
 
@@ -19,17 +20,30 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from audit.store import AuditStore
 
 
-def load_results(results_path: str = "results.json") -> list:
-    """Load reconciliation results from JSON file."""
-    if not os.path.exists(results_path):
+def load_results(results_path: Optional[str] = None) -> list:
+    """Load reconciliation results from JSON file checking configured env paths and fallbacks."""
+    target_path = results_path or os.getenv("RESULTS_PATH", "results.json")
+    if not os.path.exists(target_path):
+        for p in ["results.json", "demo_artifacts/results.json"]:
+            if os.path.exists(p):
+                target_path = p
+                break
+    if not os.path.exists(target_path):
         return []
-    with open(results_path, 'r') as f:
+    with open(target_path, 'r') as f:
         return json.load(f)
 
 
 def load_metrics() -> dict:
-    """Load metrics report from JSON file checking both default locations."""
-    paths = ["metrics/metrics_report.json", "metrics_report.json"]
+    """Load metrics report from JSON file checking configured env paths and default locations."""
+    paths = []
+    if os.getenv("METRICS_PATH"):
+        paths.append(os.getenv("METRICS_PATH"))
+    paths.extend([
+        "metrics/metrics_report.json",
+        "metrics_report.json",
+        "demo_artifacts/metrics_report.json"
+    ])
     for p in paths:
         if os.path.exists(p):
             try:
@@ -189,8 +203,10 @@ def main():
                 flat = {
                     'payment_id': r.get('payment_id', '') or r.get('record_ids', ''),
                     'status': r.get('final_status', ''),
+                    'source': r.get('source', 'synthetic'),
                     'type': r.get('type', ''),
                     'confidence': r.get('confidence', 0),
+                    'demo_flag': "🚨 FORCED DEMO" if r.get('forced_demo_case') else "standard",
                     'llm_root_cause': r.get('llm_root_cause', ''),
                 }
                 flat_results.append(flat)
@@ -217,7 +233,7 @@ def main():
             exc_df = pd.DataFrame(exceptions)
             
             # Show key columns
-            display_cols = ['record_ids', 'stage', 'rule_fired', 'confidence', 'decision']
+            display_cols = ['record_ids', 'stage', 'source', 'rule_fired', 'confidence', 'decision']
             available_cols = [c for c in display_cols if c in exc_df.columns]
             
             st.dataframe(exc_df[available_cols], use_container_width=True, hide_index=True)
@@ -233,14 +249,14 @@ def main():
             if selected is not None:
                 exc = exceptions[selected]
                 if exc.get('forced_demo_case'):
-                    st.caption("⚠️ Seeded demo case — guaranteed for presentation purposes, not organically discovered.")
+                    st.warning("🚨 FORCED DEMO CASE: Seeded discrepancy guaranteed for presentation & failure-recovery verification.")
                 st.json(exc)
                 
                 st.markdown("#### Human-in-the-Loop Maker-Checker Action")
                 with st.form(key=f"resolve_form_{selected}"):
                     c1, c2 = st.columns(2)
                     with c1:
-                        reviewer_id = st.text_input("Financial Reviewer ID", value="CONTROLLER_001")
+                        reviewer_id = st.text_input("Financial Reviewer ID (Attribution Label)", value="CONTROLLER_001")
                     with c2:
                         decision_choice = st.selectbox(
                             "Resolution Action",
@@ -252,7 +268,7 @@ def main():
                             }[x]
                         )
                     notes = st.text_area("Auditable Reviewer Notes", placeholder="E.g., Confirmed with merchant invoice INV-8821. MDR fee discrepancy authorized.")
-                    submitted = st.form_submit_button("Sign & Append to Immutable Audit Chain")
+                    submitted = st.form_submit_button("Sign & Append to Tamper-Evident Audit Chain")
                     
                     if submitted:
                         if len(notes.strip()) < 5:
@@ -323,16 +339,16 @@ def main():
             st.write("- All LLM proposals passed deterministic re-check")
             
     with tab4:
-        st.subheader("Immutable SHA-256 Audit Trail Chain")
+        st.subheader("Tamper-Evident SHA-256 Audit Trail Chain")
         st.markdown("""
         Every stage decision computes `record_hash = SHA256(previous_hash + payload)`, 
-        providing mathematical proof of immutability and compliance.
+        providing cryptographic proof of tamper-evident chaining.
         """)
         
         audit_entries = audit_store.get_all()
         if audit_entries:
             chain_df = pd.DataFrame(audit_entries)
-            display_cols = ['id', 'timestamp', 'record_ids', 'stage', 'decision', 'previous_hash', 'record_hash']
+            display_cols = ['id', 'timestamp', 'record_ids', 'stage', 'decision', 'source', 'previous_hash', 'record_hash']
             available_cols = [c for c in display_cols if c in chain_df.columns]
             st.dataframe(chain_df[available_cols], use_container_width=True, hide_index=True)
             

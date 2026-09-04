@@ -109,3 +109,74 @@ class TestApiEndpoints:
         assert "total_checked" in data
         assert "tampered_ids" in data
 
+
+import os
+
+
+class TestSecurityHardening:
+    """Regression tests for P1 security fixes."""
+
+    def test_near_miss_key_same_length_still_fails(self):
+        """
+        A key that differs from the real key by exactly one character (same length)
+        must fail authentication — validates secrets.compare_digest is used, not ==.
+        """
+        expected = os.getenv("API_SECRET_KEY", "dev-secret-key")
+        last_char = expected[-1]
+        replacement = "X" if last_char != "X" else "Y"
+        near_miss_key = expected[:-1] + replacement
+        assert near_miss_key != expected  # sanity
+
+        near_miss_client = TestClient(app, headers={"X-API-Key": near_miss_key})
+        response = near_miss_client.get("/health")
+        assert response.status_code == 403, (
+            "A near-miss API key of the same length must be rejected (status 403)"
+        )
+
+    def test_empty_api_key_is_rejected(self):
+        """An empty string API key must be rejected."""
+        empty_client = TestClient(app, headers={"X-API-Key": ""})
+        response = empty_client.get("/health")
+        assert response.status_code in (401, 403)
+
+    def test_production_startup_refuses_default_key(self, monkeypatch):
+        """
+        ENV=production + API_SECRET_KEY=dev-secret-key must raise RuntimeError at startup.
+        """
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.setenv("API_SECRET_KEY", "dev-secret-key")
+        from api.app import validate_security_configuration
+        with pytest.raises(RuntimeError, match="CRITICAL SECURITY CONFIGURATION ERROR"):
+            validate_security_configuration()
+
+    def test_production_startup_refuses_unset_key(self, monkeypatch):
+        """
+        ENV=production + no API_SECRET_KEY must raise RuntimeError at startup.
+        """
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.delenv("API_SECRET_KEY", raising=False)
+        from api.app import validate_security_configuration
+        with pytest.raises(RuntimeError, match="CRITICAL SECURITY CONFIGURATION ERROR"):
+            validate_security_configuration()
+
+    def test_development_mode_allows_default_key(self, monkeypatch):
+        """
+        ENV=development + dev-secret-key must NOT raise — only warn.
+        """
+        monkeypatch.setenv("ENV", "development")
+        monkeypatch.setenv("DEMO_MODE", "true")
+        monkeypatch.setenv("API_SECRET_KEY", "dev-secret-key")
+        from api.app import validate_security_configuration
+        validate_security_configuration()  # must not raise
+
+    def test_compare_digest_is_used(self):
+        """
+        Verify via source inspection that get_api_key uses secrets.compare_digest,
+        not a plain == / != comparison (timing-safe requirement).
+        """
+        import inspect
+        from api.app import get_api_key
+        source = inspect.getsource(get_api_key)
+        assert "secrets.compare_digest" in source, (
+            "get_api_key must use secrets.compare_digest, not plain == or !="
+        )

@@ -85,9 +85,11 @@ class SyntheticDataGenerator:
         
         # Include existing real settlements
         for i, settlement in enumerate(real_settlements[:num_real]):
-            settlement_records.append(settlement)
+            settlement_copy = dict(settlement)
+            settlement_copy['source'] = 'razorpay_test'
+            settlement_records.append(settlement_copy)
             bank_rec, ledger_rec, gt_entry = self._generate_linked_record(
-                settlement, index=i
+                settlement_copy, index=i
             )
             bank_records.append(bank_rec)
             ledger_records.append(ledger_rec)
@@ -193,7 +195,7 @@ class SyntheticDataGenerator:
             fee=fee,
             settled_at=settled_at,
             messiness_type=messiness_type,
-            source='razorpay_api'
+            source='razorpay_test'
         )
         
         return bank_rec, ledger_rec, gt_entry
@@ -377,6 +379,7 @@ class SyntheticDataGenerator:
             'root_cause': gt_root_cause,
             'notes': gt_notes,
             'messiness_type': messiness_type,
+            'source': source,
             'bank_source': source,
             'ledger_source': source
         }

@@ -164,11 +164,14 @@ class ReconciliationPipeline:
         
         if not matched_df.empty:
             for _, row in matched_df.iterrows():
+                src = row.get('source') or row.get('settlement', {}).get('source') or 'synthetic'
                 match = {
                     **row.get('settlement', {}),
                     'match_type': 'exact',
                     'confidence': 1.0,
-                    'final_status': 'matched'
+                    'final_status': 'matched',
+                    'source': src,
+                    'forced_demo_case': False
                 }
                 if isinstance(row.get('bank'), dict) and 'txn_id' in row['bank']:
                     match['bank_txn_id'] = row['bank']['txn_id']
@@ -186,11 +189,14 @@ class ReconciliationPipeline:
         
         if not fuzzy_matched.empty:
             for _, row in fuzzy_matched.iterrows():
+                src = row.get('source') or row.get('settlement', {}).get('source') or 'synthetic'
                 match = {
                     **row.get('settlement', {}),
                     'match_type': row.get('match_type'),
                     'confidence': row.get('confidence'),
-                    'final_status': 'matched'
+                    'final_status': 'matched',
+                    'source': src,
+                    'forced_demo_case': False
                 }
                 if isinstance(row.get('bank'), dict) and 'txn_id' in row['bank']:
                     match['bank_txn_id'] = row['bank']['txn_id']
@@ -215,6 +221,8 @@ class ReconciliationPipeline:
             )
             
             for exc in processed_exceptions:
+                exc['source'] = exc.get('source') or (exc.get('settlement') or {}).get('source') or (exc.get('counterpart') or {}).get('source') or 'synthetic'
+                exc['forced_demo_case'] = exc.get('forced_demo_case', False)
                 self.all_results.append(exc)
                 
                 # Count LLM-verified matches
@@ -223,7 +231,9 @@ class ReconciliationPipeline:
                         **exc.get('settlement', {}),
                         'match_type': 'llm_verified',
                         'confidence': exc.get('llm_confidence'),
-                        'final_status': 'matched_llm_verified'
+                        'final_status': 'matched_llm_verified',
+                        'source': exc['source'],
+                        'forced_demo_case': False
                     })
             
             # Summarize exception outcomes
@@ -239,6 +249,8 @@ class ReconciliationPipeline:
             # No LLM - mark all exceptions as unresolved
             for exc in exceptions:
                 exc['final_status'] = 'unresolved_exception'
+                exc['source'] = exc.get('source') or (exc.get('settlement') or {}).get('source') or (exc.get('counterpart') or {}).get('source') or 'synthetic'
+                exc['forced_demo_case'] = False
                 self.all_results.append(exc)
             print("  LLM disabled - all exceptions marked unresolved")
         
@@ -288,7 +300,8 @@ class ReconciliationPipeline:
                 )
         
         # Save results
-        results_path = "results.json"
+        results_path = os.getenv("RESULTS_PATH", "results.json")
+        os.makedirs(os.path.dirname(results_path) or '.', exist_ok=True)
         with open(results_path, 'w') as f:
             json.dump(self.all_results, f, indent=2, default=str)
         print(f"  Results saved to {results_path}")
@@ -433,10 +446,14 @@ class ReconciliationPipeline:
                     winner = dict(results[best_idx])
                     winner['_merged_from_count'] = len(comp)
                     
-                    # Merge missing identifiers from other rows into the winner
+                    # Merge missing identifiers and metadata from other rows into the winner
                     # so it doesn't lose its entity_id/payment_id if an orphaned bank row was picked.
                     for idx in comp:
                         r = results[idx]
+                        if r.get('forced_demo_case'):
+                            winner['forced_demo_case'] = True
+                        if not winner.get('source') and r.get('source'):
+                            winner['source'] = r.get('source')
                         for key in ['entity_id', 'settlement_id', 'payment_id', 'order_id']:
                             if not winner.get(key) and r.get(key):
                                 winner[key] = r.get(key)
@@ -444,6 +461,10 @@ class ReconciliationPipeline:
                             for key in ['entity_id', 'settlement_id', 'payment_id', 'order_id']:
                                 if not winner.get(key) and r['settlement'].get(key):
                                     winner[key] = r['settlement'].get(key)
+                    if not winner.get('source'):
+                        winner['source'] = 'synthetic'
+                    if 'forced_demo_case' not in winner:
+                        winner['forced_demo_case'] = False
                                     
                     deduplicated.append(winner)
             else:
@@ -453,6 +474,8 @@ class ReconciliationPipeline:
                     row_copy['final_status'] = 'unresolved_exception'
                     row_copy['type'] = 'ambiguous_shared_identifier'
                     row_copy['_ambiguous_merge'] = True
+                    row_copy['source'] = row_copy.get('source', 'synthetic')
+                    row_copy['forced_demo_case'] = row_copy.get('forced_demo_case', False)
                     deduplicated.append(row_copy)
 
         return deduplicated

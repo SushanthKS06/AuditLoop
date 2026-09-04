@@ -26,6 +26,8 @@ class AuditEntry(BaseModel):
     match_type: Optional[str] = Field(None, description="exact_utr, exact_order, fuzzy_bank, fuzzy_ledger, llm_verified")
     llm_reasoning: Optional[str] = Field(None, description="Explanation text if LLM was invoked")
     final_status: Optional[str] = Field(None, description="Final resolved state in pipeline")
+    source: Optional[str] = Field("synthetic", description="Data provenance: razorpay_test or synthetic")
+    forced_demo_case: Optional[bool] = Field(False, description="Flag indicating injected demo disagreement")
     previous_hash: Optional[str] = Field(None, description="SHA-256 hash of previous audit record")
     record_hash: Optional[str] = Field(None, description="SHA-256 hash of this record (previous_hash + payload)")
 
@@ -52,7 +54,11 @@ class HumanResolutionRequest(BaseModel):
     decision: Literal["human_approved_match", "human_rejected_duplicate", "human_written_off"] = Field(
         ..., description="Manual review decision"
     )
-    reviewer_id: str = Field(..., min_length=3, description="Employee/Controller ID performing the review")
+    reviewer_id: str = Field(
+        ...,
+        min_length=3,
+        description="Attribution display label for reviewer (e.g. employee/controller ID), not a cryptographic identity"
+    )
     notes: str = Field(..., min_length=5, description="Auditable rationale for the override")
 
 

@@ -134,7 +134,7 @@ class RazorpayReconClient:
                 'method': record.get('method', ''),
                 'card_network': record.get('card_network', ''),
                 'dispute_id': record.get('dispute_id', ''),
-                'source': 'razorpay_api'  # Tag source for hybrid mode tracking
+                'source': 'razorpay_test'  # Standardized source tag for live/test Razorpay API records
             }
             normalized.append(row)
         

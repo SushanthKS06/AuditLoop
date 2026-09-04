@@ -292,14 +292,19 @@ class DeterministicMatcher:
             if matched_bank_row is not None:
                 match_type = 'exact_3way' if matched_ledger_row is not None else 'exact_utr'
                 
+                sett_dict = sett.to_dict()
+                src = sett_dict.get('source') or (matched_bank_row.get('source') if matched_bank_row is not None else None) or (matched_ledger_row.get('source') if matched_ledger_row is not None else None) or 'synthetic'
+                
                 match_record = {
-                    'settlement': sett.to_dict(),
+                    'settlement': sett_dict,
                     'bank': matched_bank_row.to_dict() if matched_bank_row is not None else None,
                     'ledger': matched_ledger_row.to_dict() if matched_ledger_row is not None else None,
                     'match_type': match_type,
                     'confidence': 1.0,
                     'rule_fired': "+".join(rule_fired) if rule_fired else 'exact_match',
-                    'final_status': 'matched'
+                    'final_status': 'matched',
+                    'source': src,
+                    'forced_demo_case': False
                 }
                 matched_records.append(match_record)
                 matched_settlement_ids.add(sett.name)
@@ -322,7 +327,9 @@ class DeterministicMatcher:
                     'confidence': 1.0,
                     'decision': 'matched',
                     'match_type': match_type,
-                    'final_status': 'matched'
+                    'final_status': 'matched',
+                    'source': src,
+                    'forced_demo_case': False
                 })
 
         
@@ -472,6 +479,10 @@ class DeterministicMatcher:
                     low_confidence_records.append(match_record)
                     decision = 'low_confidence'
                 
+                fuzzy_src = sett.get('source') or (match_record['bank'].get('source') if match_record['bank'] else None) or (match_record['ledger'].get('source') if match_record['ledger'] else None) or 'synthetic'
+                match_record['source'] = fuzzy_src
+                match_record['forced_demo_case'] = False
+
                 record_id_parts = [str(sett.get('entity_id', sett.get('payment_id', '')))]
                 if match_record['bank']:
                     record_id_parts.append(str(match_record['bank'].get('txn_id', '')))
@@ -485,7 +496,9 @@ class DeterministicMatcher:
                     'confidence': match_record['confidence'],
                     'decision': decision,
                     'match_type': match_record['match_type'],
-                    'final_status': decision
+                    'final_status': decision,
+                    'source': fuzzy_src,
+                    'forced_demo_case': False
                 })
         
         # Build result DataFrames
@@ -615,13 +628,16 @@ class DeterministicMatcher:
                 sett_id = str(sett.get('entity_id') or sett.get('payment_id') or sett.get('settlement_id') or '')
                 count_id = str(count.get('txn_id') or count.get('order_id') or count.get('payment_id') or count.get('customer_ref') or count.get('utr') or '')
                 rec_id = f"{sett_id}-{count_id}" if sett_id and count_id else (sett_id or count_id)
+                src = sett.get('source') or count.get('source') or 'synthetic'
                 exceptions.append({
                     'type': 'low_confidence',
                     'record_ids': rec_id,
                     'settlement': sett,
                     'counterpart': count,
                     'confidence': row.get('confidence', 0),
-                    'rule_fired': row.get('rule_fired', '')
+                    'rule_fired': row.get('rule_fired', ''),
+                    'source': src,
+                    'forced_demo_case': False
                 })
         
         # Unmatched settlements
@@ -634,7 +650,9 @@ class DeterministicMatcher:
                     'settlement': r,
                     'counterpart': None,
                     'confidence': 0.0,
-                    'rule_fired': 'no_candidate_found'
+                    'rule_fired': 'no_candidate_found',
+                    'source': r.get('source', 'synthetic'),
+                    'forced_demo_case': False
                 })
         
         # Unmatched bank transactions
@@ -647,7 +665,9 @@ class DeterministicMatcher:
                     'settlement': None,
                     'counterpart': r,
                     'confidence': 0.0,
-                    'rule_fired': 'no_candidate_found'
+                    'rule_fired': 'no_candidate_found',
+                    'source': r.get('source', 'synthetic'),
+                    'forced_demo_case': False
                 })
         
         # Unmatched ledger entries
@@ -660,7 +680,9 @@ class DeterministicMatcher:
                     'settlement': None,
                     'counterpart': r,
                     'confidence': 0.0,
-                    'rule_fired': 'no_candidate_found'
+                    'rule_fired': 'no_candidate_found',
+                    'source': r.get('source', 'synthetic'),
+                    'forced_demo_case': False
                 })
         
         return exceptions

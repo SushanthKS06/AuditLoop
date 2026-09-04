@@ -14,7 +14,7 @@
 | **0:00 - 0:45** | **The Industry Problem** | Split screen: Razorpay Recon CSV, Bank statement, ERP ledger | Reconciliation is an unmitigated nightmare of timing lags and MDR fee deductions. |
 | **0:45 - 1:30** | **The Architectural Thesis** | Architecture diagram | *The LLM proposes; deterministic verifier disposes.* Never trust an LLM with money. |
 | **1:30 - 3:00** | **Live Pipeline Demo** | Streamlit Dashboard & Terminal | Stage 1 ($O(N+M+L)$ hash match), Stage 2 (fuzzy fee scoring), Stage 3 (Groq GPT-OSS 120B structured reasoning). |
-| **3:00 - 3:45** | **Failure Recovery & Disagreements** | Disagreements Tab & HITL Form | Fail-closed demonstration: LLM hallucination caught and stopped cold. Maker-checker human sign-off. |
+| **3:00 - 3:45** | **Failure Recovery & Disagreements** | Disagreements Tab & HITL Form | Fail-closed demonstration: LLM proposal rejected by deterministic re-verifier. Maker-checker human sign-off. |
 | **3:45 - 4:30** | **Cryptographic Auditability & Metrics** | `/audit/verify` API & SHA-256 Tab | Mathematical tamper-evidence with SHA-256 block hashing; ground truth metrics ($93.8\%$ precision). |
 | **4:30 - 5:00** | **Enterprise Scale & Closing** | API Docs & Terminal benchmarks | Scalable hash indexing, ~66.7% of records resolved at zero LLM cost, tamper-evident audit chain. |
 
@@ -82,7 +82,7 @@
 ### 5. Cryptographic Audit Chain & REST API (3:45 - 4:30)
 **[Visual: Click on 'Audit Hash Chain' tab, then run `curl http://localhost:8000/audit/verify` in terminal]**
 
-> *"Every single decision—Stage 1 exact matches, Stage 2 fuzzy matches, LLM reasoning, and human overrides—is chained in a tamper-evident sequence using SHA-256 block hashing, exactly like a private blockchain.
+> *"Every single decision—Stage 1 exact matches, Stage 2 fuzzy matches, LLM reasoning, and human overrides—is chained in a tamper-evident sequence using SHA-256 block hashing (stored in SQLite, not a blockchain).
 > 
 > Each record's hash is computed from the previous block's hash plus the full payload:  
 > `record_hash = SHA256(previous_hash + timestamp + record_ids + stage + decision)`.

@@ -102,7 +102,9 @@ class ExceptionDispatcher:
                             'confidence': result.get('llm_confidence', 0),
                             'decision': result.get('final_status', 'unresolved_exception'),
                             'llm_reasoning': result.get('llm_explanation') or result.get('llm_error_detail', '') or '',
-                            'llm_error_detail': result.get('llm_error_detail')
+                            'llm_error_detail': result.get('llm_error_detail'),
+                            'source': result.get('source', 'synthetic'),
+                            'forced_demo_case': result.get('forced_demo_case', False)
                         })
         
         return processed
@@ -111,6 +113,8 @@ class ExceptionDispatcher:
         """Process a single exception through the LLM layer."""
         result = {
             **exception,
+            'source': exception.get('source', 'synthetic'),
+            'forced_demo_case': exception.get('forced_demo_case', False),
             'llm_invoked': False,
             'llm_root_cause': None,
             'llm_explanation': None,
@@ -197,6 +201,7 @@ class ExceptionDispatcher:
         """
         result = {
             **exception,
+            'source': exception.get('source', 'synthetic'),
             'llm_invoked': True,
             'llm_root_cause': 'timing_lag',
             'llm_explanation': 'The LLM suggests these records match despite the amount difference, citing potential fee variations.',
