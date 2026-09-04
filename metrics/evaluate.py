@@ -231,7 +231,7 @@ class MetricsEvaluator:
         )
 
         ground_truth_coverage = (
-            round(scored_count / total_recs, 4) if total_recs > 0 else 0.0
+            round(len(used_gt_ids) / len(self.ground_truth), 4) if len(self.ground_truth) > 0 else 0.0
         )
 
         metrics: Dict[str, Any] = {

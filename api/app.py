@@ -25,7 +25,7 @@ from metrics.evaluate import MetricsEvaluator
 
 app = FastAPI(
     title="AuditLoop Reconciliation API",
-    description="Production-grade REST API for multi-source financial reconciliation with deterministic-first matching, fee awareness, and LLM-assisted exception handling.",
+    description="Prototype REST API for multi-source financial reconciliation with deterministic-first matching, fee awareness, and LLM-assisted exception handling.",
     version="1.0.0"
 )
 
@@ -265,13 +265,17 @@ def resolve_audit_exception(request: HumanResolutionRequest):
     The decision is immutably appended to the SHA-256 chained audit trail with cryptographic proof.
     """
     store = AuditStore()
-    result = store.resolve_exception(
-        record_ids=request.record_ids,
-        reviewer_id=request.reviewer_id,
-        decision=request.decision,
-        notes=request.notes
-    )
-    return HumanResolutionResponse(**result)
+    try:
+        result = store.resolve_exception(
+            record_ids=request.record_ids,
+            reviewer_id=request.reviewer_id,
+            decision=request.decision,
+            notes=request.notes
+        )
+        return HumanResolutionResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 
 @app.get("/audit/history", response_model=List[Dict[str, Any]], dependencies=[Depends(get_api_key)])

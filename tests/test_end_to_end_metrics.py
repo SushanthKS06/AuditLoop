@@ -181,8 +181,8 @@ class TestStrictCoverageMode:
         assert metrics['unverified_count'] == 5, (
             f"Expected unverified_count=5, got {metrics['unverified_count']}"
         )
-        assert metrics['ground_truth_coverage'] == pytest.approx(10 / 15, abs=1e-3), (
-            f"Expected coverage ≈ 0.6667, got {metrics['ground_truth_coverage']}"
+        assert metrics['ground_truth_coverage'] == 1.0, (
+            f"Expected coverage == 1.0, got {metrics['ground_truth_coverage']}"
         )
         assert metrics['coverage_mode'] == 'strict'
 
@@ -326,3 +326,47 @@ class TestStrictCoverageMode:
 
         assert metrics['ground_truth_coverage'] == 1.0
         assert metrics['unverified_count'] == 0
+
+    def test_duplicate_gt_mapping_does_not_inflate_coverage(self, tmp_path):
+        """
+        Adversarial test: If two result records try to map to the same GT record,
+        it should not inflate unique coverage. The duplicate should be flagged as
+        a false positive or explicitly tracked in duplicate_ground_truth_assignments.
+        """
+        gt_entries = [
+            {
+                'payment_id': 'PAY_001',
+                'ledger_order_id': 'ORD_001',
+                'utr': 'UTR000001',
+                'bank_txn_id': 'TXN_000001',
+                'should_match': True,
+                'root_cause': 'exact_match',
+                'notes': '',
+                'messiness_type': 'exact_match',
+            },
+            {
+                'payment_id': 'PAY_002',
+                'ledger_order_id': 'ORD_002',
+                'utr': 'UTR000002',
+                'bank_txn_id': 'TXN_000002',
+                'should_match': True,
+                'root_cause': 'exact_match',
+                'notes': '',
+                'messiness_type': 'exact_match',
+            }
+        ]
+        evaluator = self._build_evaluator_with_gt(tmp_path, gt_entries)
+        
+        # Two results mapping to PAY_001, none mapping to PAY_002
+        results = [
+            {'payment_id': 'PAY_001', 'final_status': 'matched'},
+            {'payment_id': 'PAY_001', 'final_status': 'matched'}
+        ]
+        
+        metrics = evaluator.evaluate(results, output_path=None, coverage_mode="strict")
+        
+        # 2 GT records total, but only 1 unique GT record was mapped to.
+        # Coverage must be 0.5 (1/2), not 1.0 (2/2)
+        assert metrics['ground_truth_coverage'] == 0.5
+        assert metrics['duplicate_ground_truth_assignments'] == 1
+        assert metrics['false_positives'] == 1  # The duplicate mapping is a false positive

@@ -208,8 +208,15 @@ class DeterministicMatcher:
                 for b in bank_by_utr[sett['utr_norm']]:
                     if b.name not in matched_bank_ids:
                         # Guard: bank row must have a usable amount
-                        if self._normalize_amount(b.get('amount')) is None:
+                        b_amt = self._normalize_amount(b.get('amount'))
+                        if b_amt is None:
                             continue
+                        
+                        # Guard: Stage 1 exact match requires amounts to be practically identical (or handled in Stage 2 if fee mismatch)
+                        s_amt = self._normalize_amount(sett.get('settled_amount') if pd.notna(sett.get('settled_amount')) else sett.get('amount'))
+                        if s_amt is not None and abs(s_amt - b_amt) / max(s_amt, b_amt, 1) > (self.amount_threshold_pct / 100.0):
+                            continue
+
                         matched_bank_row = b
                         rule_fired.append('utr_exact_match')
                         break
@@ -218,8 +225,14 @@ class DeterministicMatcher:
                 for b in bank_by_payment[sett['payment_norm']]:
                     if b.name not in matched_bank_ids:
                         # Guard: bank row must have a usable amount
-                        if self._normalize_amount(b.get('amount')) is None:
+                        b_amt = self._normalize_amount(b.get('amount'))
+                        if b_amt is None:
                             continue
+                        
+                        s_amt = self._normalize_amount(sett.get('settled_amount') if pd.notna(sett.get('settled_amount')) else sett.get('amount'))
+                        if s_amt is not None and abs(s_amt - b_amt) / max(s_amt, b_amt, 1) > (self.amount_threshold_pct / 100.0):
+                            continue
+
                         # Guard: if both settlement and bank have non-empty UTRs and
                         # they DISAGREE, this bank row is an orphan/wrong counterpart.
                         # (The primary UTR path already enforces exact agreement;
@@ -239,8 +252,14 @@ class DeterministicMatcher:
                 for l in ledger_by_order[sett['order_norm']]:
                     if l.name not in matched_ledger_ids:
                         # Guard: ledger row must have a usable amount
-                        if self._normalize_amount(l.get('expected_amount')) is None:
+                        l_amt = self._normalize_amount(l.get('expected_amount'))
+                        if l_amt is None:
                             continue
+                        
+                        s_gross = self._normalize_amount(sett.get('amount'))
+                        if s_gross is not None and abs(s_gross - l_amt) / max(s_gross, l_amt, 1) > (self.amount_threshold_pct / 100.0):
+                            continue
+
                         matched_ledger_row = l
                         rule_fired.append('order_exact_match')
                         break
@@ -249,8 +268,14 @@ class DeterministicMatcher:
                 for l in ledger_by_payment[sett['payment_norm']]:
                     if l.name not in matched_ledger_ids:
                         # Guard 1: ledger row must have a usable amount (orphan check)
-                        if self._normalize_amount(l.get('expected_amount')) is None:
+                        l_amt = self._normalize_amount(l.get('expected_amount'))
+                        if l_amt is None:
                             continue
+                        
+                        s_gross = self._normalize_amount(sett.get('amount'))
+                        if s_gross is not None and abs(s_gross - l_amt) / max(s_gross, l_amt, 1) > (self.amount_threshold_pct / 100.0):
+                            continue
+
                         # Guard 2: if both settlement and ledger have an order_id and
                         # they DISAGREE, this is a duplicate-suspect / wrong-counterpart
                         # scenario — reject rather than committing on payment_id alone.

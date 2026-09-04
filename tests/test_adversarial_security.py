@@ -93,3 +93,53 @@ class TestNumericAndSqlEdgeCases:
         assert self.matcher._normalize_amount(None) is None
         assert self.matcher._normalize_amount("invalid_amount_str") is None
         assert self.matcher._normalize_amount("1000000000.99") == 1000000000.99
+
+    def test_adversarial_arbitrary_amount_discrepancies(self):
+        """Verify that 3%, 4%, and 5% arbitrary amount discrepancies (without matching fees) cannot auto-match."""
+        import pandas as pd
+        from engine.matcher import DeterministicMatcher
+        
+        matcher = DeterministicMatcher()
+        
+        for mismatch_pct in [0.03, 0.04, 0.05]:
+            settlement_amount = 1000.0
+            bank_amount = settlement_amount * (1.0 - mismatch_pct)
+            
+            settlements = pd.DataFrame([{
+                'payment_id': f'PAY_TEST_{mismatch_pct}',
+                'settlement_utr': f'UTR_{mismatch_pct}',
+                'order_id': f'ORD_{mismatch_pct}',
+                'amount': settlement_amount,
+                'fee': 0.0,
+                'tax': 0.0,
+                'created_at': "2026-09-01"
+            }])
+            bank = pd.DataFrame([{
+                'txn_id': f'TXN_{mismatch_pct}',
+                'utr': f'UTR_{mismatch_pct}',
+                'amount': bank_amount,
+                'value_date': "2026-09-01",
+                'reference': f'PAY_TEST_{mismatch_pct}'
+            }])
+            ledger = pd.DataFrame([{
+                'order_id': f'ORD_{mismatch_pct}',
+                'expected_amount': settlement_amount,
+                'order_date': "2026-09-01",
+                'payment_id': f'PAY_TEST_{mismatch_pct}'
+            }])
+            
+            # Since amount diverges by >2% and no fee justifies it, it must NOT match exactly or closely enough to pass final rules.
+            # Stage 1 exact match should definitely fail
+            matched_df, unmatched_s, unmatched_b, unmatched_l, audits = matcher.stage1_exact_match(
+                settlements, bank, ledger
+            )
+            assert len(matched_df) == 0, f"{mismatch_pct*100}% discrepancy matched in Stage 1!"
+            
+            # Stage 2 fuzzy match should also fail to yield a 'matched' status because fee math won't balance
+            matched_df2, low_conf2, unmatched_s2, unmatched_b2, unmatched_l2, audits2 = matcher.stage2_fuzzy_match(
+                unmatched_s, unmatched_b, unmatched_l
+            )
+            # Either it doesn't match at all, or it is flagged as 'unresolved_exception' / 'low_confidence' / 'disagreement'
+            if len(matched_df2) > 0:
+                final_status = matched_df2.iloc[0]['final_status']
+                assert final_status != 'matched', f"{mismatch_pct*100}% discrepancy auto-matched in Stage 2!"

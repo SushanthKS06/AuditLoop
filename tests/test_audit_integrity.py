@@ -75,3 +75,32 @@ class TestAuditIntegrity:
         integrity = audit_store.verify_integrity()
         assert integrity['integrity_verified'] is False
         assert 2 in integrity['tampered_ids']
+
+    def test_tamper_detection_on_match_type_and_llm_reasoning(self, audit_store):
+        """Test tampering with match_type or llm_reasoning breaks the hash chain."""
+        audit_store.append({
+            'record_ids': 'sett_001-TXN_001',
+            'stage': 'stage3_llm',
+            'decision': 'llm_deterministic_disagreement',
+            'confidence': 0.85,
+            'match_type': 'amount_mismatch',
+            'llm_reasoning': 'The amount differs by tax.'
+        })
+
+        # Tamper with match_type
+        with sqlite3.connect(audit_store.db_path) as conn:
+            conn.execute("UPDATE audit_log SET match_type = 'perfect_match' WHERE id = 1")
+            conn.commit()
+
+        integrity = audit_store.verify_integrity()
+        assert integrity['integrity_verified'] is False
+        assert 1 in integrity['tampered_ids']
+
+        # Fix match_type, tamper with llm_reasoning
+        with sqlite3.connect(audit_store.db_path) as conn:
+            conn.execute("UPDATE audit_log SET match_type = 'amount_mismatch', llm_reasoning = 'Hacked' WHERE id = 1")
+            conn.commit()
+
+        integrity = audit_store.verify_integrity()
+        assert integrity['integrity_verified'] is False
+        assert 1 in integrity['tampered_ids']

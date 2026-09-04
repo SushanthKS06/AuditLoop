@@ -99,3 +99,36 @@ class TestHumanResolutionApi:
         assert data["reviewer_id"] == payload["reviewer_id"]
         assert data["integrity_verified"] is True
         assert len(data["record_hash"]) == 64  # Valid SHA-256 hex string
+
+    def test_invalid_reviewer_id(self):
+        payload = {
+            "record_ids": "sett_api_test-TXN_999",
+            "decision": "human_approved_match",
+            "reviewer_id": "system",
+            "notes": "Invalid reviewer"
+        }
+        response = self.client.post("/audit/resolve", json=payload)
+        assert response.status_code == 400
+        assert "Must be a distinct human controller" in response.json()["detail"]
+
+    def test_duplicate_resolution(self):
+        # 1. Resolve first time
+        payload = {
+            "record_ids": "sett_api_test-TXN_dup",
+            "decision": "human_approved_match",
+            "reviewer_id": "AUDITOR_ALICE",
+            "notes": "First resolution"
+        }
+        resp1 = self.client.post("/audit/resolve", json=payload)
+        assert resp1.status_code == 200
+
+        # 2. Attempt duplicate resolution
+        payload2 = {
+            "record_ids": "sett_api_test-TXN_dup",
+            "decision": "human_rejected_duplicate",
+            "reviewer_id": "AUDITOR_BOB",
+            "notes": "Second resolution attempt"
+        }
+        resp2 = self.client.post("/audit/resolve", json=payload2)
+        assert resp2.status_code == 400
+        assert "already been resolved" in resp2.json()["detail"]
