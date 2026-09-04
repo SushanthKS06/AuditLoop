@@ -12,9 +12,18 @@ Orchestrates the full reconciliation flow:
 """
 
 import os
+import sys
 import json
 import argparse
 from typing import Optional
+
+# Ensure standard output can handle UTF-8 on Windows cp1252 consoles without crashing
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -117,7 +126,7 @@ class ReconciliationPipeline:
         print("="*60)
         
         if self.force_disagreement_demo:
-            print("\n🚨 WARNING: FORCED DEMO CASE ENABLED 🚨")
+            print("\n[!] WARNING: FORCED DEMO CASE ENABLED [!]")
             print("This run includes at least one fabricated discrepancy to demonstrate")
             print("the LLM-vs-Deterministic conflict resolution UI.")
             print("="*60)

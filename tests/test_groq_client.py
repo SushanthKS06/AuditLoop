@@ -432,6 +432,90 @@ class TestModelIsNotDecommissioned:
             "Dead model string 'llama-3.3-70b-versatile' found assigned to DEFAULT_MODEL in llm/client.py source."
         )
 
+    def test_no_decommissioned_model_as_live_value_repo_wide(self):
+        """
+        Scan every .py, .yml, .yaml, .md, .env* file in the entire repository.
+        Fail if 'llama-3.3-70b-versatile' appears anywhere except inside
+        explanatory comments, deprecation notices, changelogs, or test assertions.
+        It must never appear as a live default or active configuration value.
+        """
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parent.parent
+        target_extensions = {".py", ".yml", ".yaml", ".md"}
+        exclude_dirs = {".git", "__pycache__", ".pytest_cache", "myenv", "venv", ".venv", ".devcontainer"}
+
+        violations = []
+        target_model = "llama-3.3-70b-versatile"
+
+        for file_path in repo_root.rglob("*"):
+            if not file_path.is_file():
+                continue
+            if any(part in exclude_dirs for part in file_path.parts):
+                continue
+
+            name = file_path.name
+            suffix = file_path.suffix.lower()
+            is_env_file = name.startswith(".env")
+            if suffix not in target_extensions and not is_env_file:
+                continue
+
+            try:
+                content = file_path.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+
+            if target_model not in content:
+                continue
+
+            for line_no, line in enumerate(content.splitlines(), start=1):
+                if target_model not in line:
+                    continue
+
+                stripped = line.strip()
+
+                # In tests, referencing the decommissioned string in assertions/docstrings is allowed
+                if file_path.name.startswith("test_") or "tests" in file_path.parts:
+                    continue
+
+                # In CHANGELOG or docs explaining deprecation
+                if file_path.name in ("CHANGELOG.md",):
+                    continue
+
+                lower_line = stripped.lower()
+                is_comment = (
+                    stripped.startswith("#")
+                    or stripped.startswith("//")
+                    or stripped.startswith("*")
+                    or stripped.startswith('"""')
+                    or stripped.startswith("'''")
+                )
+                has_deprecation_context = any(
+                    word in lower_line
+                    for word in ("decommission", "deprecat", "original model", "was replaced", "historical", "returns http 404")
+                )
+
+                # Prose or comments explaining the deprecation are explicitly permitted
+                if has_deprecation_context:
+                    # But verify it's NOT an active code assignment or live config setting
+                    is_live_config = (
+                        "default_model" in lower_line
+                        or lower_line.startswith("groq_model=")
+                        or lower_line.startswith("groq_model:")
+                        or "${groq_model:-" in lower_line
+                    )
+                    if not is_live_config:
+                        continue
+
+                violations.append(
+                    f"{file_path.relative_to(repo_root)}:L{line_no} -> {stripped}"
+                )
+
+        assert not violations, (
+            f"Found live or unapproved references to decommissioned model '{target_model}' in repository:\n"
+            + "\n".join(violations)
+        )
+
 
 class TestModelNotFoundSurfacesLoudly:
     """

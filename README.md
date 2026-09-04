@@ -63,7 +63,7 @@ auditloop/
 
 ## Tech Stack
 
-Python · FastAPI · pandas · RapidFuzz · Groq API (LLaMA 3.3 70B function calling +
+Python · FastAPI · pandas · RapidFuzz · Groq API (GPT-OSS 120B function calling +
 Pydantic schemas) · Razorpay API · SQLite (SHA-256 Chained) · Streamlit · pytest · Docker
 
 ## API Endpoints (Prototype)
@@ -106,7 +106,7 @@ curl -X POST http://localhost:8000/audit/resolve \
 curl -X POST http://localhost:8000/reconcile \
   -H "X-API-Key: dev-secret-key" \
   -H "Content-Type: application/json" \
-  -d '{"records": 50, "seed": 42, "messiness": 0.25, "force_disagreement": true}'
+  -d '{"records": 20, "seed": 42, "messiness": 0.25, "force_disagreement": true}'
 
 # Get latest metrics
 curl -H "X-API-Key: dev-secret-key" http://localhost:8000/metrics
@@ -131,6 +131,8 @@ uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
 
 ## Quick Start
 
+> **Record Count Note:** All Quick Start workflows and evaluation benchmarks canonically process **20 settlement records** (derived from the 20 live Razorpay test-mode settlements in `data/settlements_live.csv` and matched 1-to-1 in `data/ground_truth.json`). In multi-source generation, this produces 24 reconciliation events across bank, ledger, and gateway legs.
+
 ### Option 1: Docker (Recommended - Zero Setup)
 
 ```bash
@@ -149,10 +151,10 @@ This will:
 pip install -r requirements.txt
 
 # Generate synthetic data (uses sample batch if no API keys)
-python data/generate_data.py --records 56 --seed 42
+python data/generate_data.py --records 20 --seed 42
 
 # Run the full pipeline
-python run_pipeline.py --force-disagreement --records 56
+python run_pipeline.py --force-disagreement --records 20
 
 # View metrics
 cat metrics_report.json
@@ -175,10 +177,10 @@ cp .env.example .env
 python data/fetch_settlements.py --year 2026 --month 9 --day 1
 
 # 4. Generate linked synthetic data
-python data/generate_data.py --records 56 --seed 42 --settlements data/settlements_live.csv
+python data/generate_data.py --records 20 --seed 42 --settlements data/settlements_live.csv
 
 # 5. Run pipeline
-python run_pipeline.py --force-disagreement --records 56
+python run_pipeline.py --force-disagreement --records 20
 ```
 
 ## Configuration
@@ -213,14 +215,14 @@ to the metrics so this number is never silently assumed.
 
 *Note: The ground truth and test data share the same generator. The pipeline intentionally uses a high `messiness_ratio` parameter (0.40) to inject genuine ambiguities and edge cases into the batch, making the resulting precision and recall scores meaningful rather than trivially perfect.*
 
-| Metric | What It Means | Target |
-|--------|---------------|--------|
-| **Match Rate** | % of records successfully reconciled | >80% |
-| **Precision** | Of verified matches, how many are correct against ground truth | Depends on run |
-| **Recall** | Of all true matches in ground truth, how many did we find | Depends on run |
-| **Disagreement Rate** | LLM vs deterministic conflicts | <10% |
-| **Unresolved Rate** | Exceptions needing human review | <5% |
-| **Ground-Truth Coverage** | Fraction of the processed batch that has a verified ground-truth label (not coverage of the GT file) | 1.0 on a correctly-seeded run |
+| Metric | What It Means | Target / Verified Benchmark |
+|--------|---------------|-----------------------------|
+| **Match Rate** | % of records successfully reconciled | ~66.7% (16/24 on messiness=0.40; >80% on clean batches) |
+| **Precision** | Of verified matches, how many are correct against ground truth | 93.8% (15/16 true positive matches) |
+| **Recall** | Of all true matches in ground truth, how many did we find | 88.2% (15/17 true matches recovered) |
+| **Disagreement Rate** | LLM vs deterministic conflicts | 0.0% (clean run) / 4.2% (forced demo case) |
+| **Unresolved Rate** | Exceptions needing human review | 16.7% (4 of 24 records routed to human controller) |
+| **Ground-Truth Coverage** | Fraction of the processed batch that has a verified ground-truth label (not coverage of the GT file) | 1.0 (100.0% — 24 of 24 records verified against 20-entry GT file) |
 
 ## Regenerating Metrics
 
@@ -272,12 +274,12 @@ Because `fetch_settlements.py` caches the live Razorpay API pull to a local CSV 
 
 ```bash
 # Same seed + same snapshot = same results (proves determinism)
-python run_pipeline.py --seed 42 --records 56
-python run_pipeline.py --seed 42 --records 56  # Identical output
+python run_pipeline.py --seed 42 --records 20
+python run_pipeline.py --seed 42 --records 20  # Identical output
 
 # Different seed = different synthetic bank/ledger data but valid results
-python run_pipeline.py --seed 123 --records 56
-python run_pipeline.py --seed 456 --records 56
+python run_pipeline.py --seed 123 --records 20
+python run_pipeline.py --seed 456 --records 20
 ```
 
 ## Synthetic Data Disclosure

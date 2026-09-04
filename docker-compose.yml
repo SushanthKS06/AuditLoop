@@ -6,13 +6,15 @@ services:
     volumes:
       - ./data:/app/data
       - ./metrics:/app/metrics
+      - ./results.json:/app/results.json
+      - ./audit_trail.db:/app/audit_trail.db
       - ./.env:/app/.env:ro
     environment:
       - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-}
       - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
-      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
-    command: python run_pipeline.py --force-disagreement --records 50
+      - GROQ_MODEL=${GROQ_MODEL:-}
+    command: python run_pipeline.py --force-disagreement --records 20
     profiles:
       - run
 
@@ -40,16 +42,18 @@ services:
     volumes:
       - ./data:/app/data
       - ./metrics:/app/metrics
+      - ./results.json:/app/results.json
+      - ./audit_trail.db:/app/audit_trail.db
       - ./.env:/app/.env:ro
     environment:
       - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-}
       - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
-      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - GROQ_MODEL=${GROQ_MODEL:-}
       - PYTHONUNBUFFERED=1
     # Run pipeline first, then start dashboard and API server
     command: >
-      sh -c "python run_pipeline.py --force-disagreement --records 50 && 
+      sh -c "python run_pipeline.py --force-disagreement --records 20 && 
              (streamlit run dashboard/app.py --server.address=0.0.0.0 --server.port=8501 &
               uvicorn api.app:app --host 0.0.0.0 --port 8000)"
     profiles:
@@ -67,7 +71,7 @@ services:
       - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-}
       - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
-      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - GROQ_MODEL=${GROQ_MODEL:-}
       - PYTHONUNBUFFERED=1
     command: uvicorn api.app:app --host 0.0.0.0 --port 8000
     profiles:

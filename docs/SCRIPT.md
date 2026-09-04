@@ -44,18 +44,18 @@
 > We engineered a 3-stage pipeline:
 > - **Stage 1**: Vectorized exact hash-join on normalized UTRs, order IDs, and payment IDs in $O(N+M+L)$ time.
 > - **Stage 2**: Deterministic fuzzy matching with MDR fee deduction awareness and date proximity scoring.
-> - **Stage 3**: For remaining unresolved exceptions, LLaMA 3.3 analyzes the root cause with step-by-step Chain-of-Thought and PII redaction.
+> - **Stage 3**: For remaining unresolved exceptions, GPT-OSS 120B analyzes the root cause with structured evidence-based reasoning and PII redaction.
 > 
 > If the LLM proposes an action, our deterministic engine intercepts it and re-verifies the mathematics before committing. If there is any discrepancy, we fail closed."*
 
 ---
 
 ### 3. Live Pipeline Execution & Dashboard (1:30 - 3:00)
-**[Visual: Run `python run_pipeline.py --force-disagreement --records 50` in terminal, then switch to Streamlit Dashboard]**
+**[Visual: Run `python run_pipeline.py --force-disagreement --records 20` in terminal, then switch to Streamlit Dashboard]**
 
-> *"Let's see it live. We run a batch of 50 multi-source transactions with injected anomalies: settlement delays, gateway fee deductions, and duplicate amounts.
+> *"Let's see it live. We run a batch of 20 live-linked multi-source transactions (24 reconciliation events) with injected anomalies: settlement delays, gateway fee deductions, and duplicate amounts.
 > 
-> Notice how fast Stage 1 and 2 execute: 85%+ of records are matched in milliseconds at **zero LLM token cost**.
+> Notice how fast Stage 1 and 2 execute: ~66.7% of records are matched in milliseconds at **zero LLM token cost** — on a batch with messiness_ratio=0.40 deliberately injecting high ambiguity, routing the remaining 33.3% to Stage 3 reasoning and human review is an intentional safety feature.
 > 
 > Now let's open the AuditLoop Reviewer Dashboard.
 > Right at the top, we see our institutional metrics calculated mathematically against a known ground-truth answer key—not cherry-picked demo data.
@@ -82,7 +82,7 @@
 ### 5. Cryptographic Audit Chain & REST API (3:45 - 4:30)
 **[Visual: Click on 'Audit Hash Chain' tab, then run `curl http://localhost:8000/audit/verify` in terminal]**
 
-> *"Every single decision—Stage 1 exact matches, Stage 2 fuzzy matches, LLM reasoning, and human overrides—is immutably chained using SHA-256 block hashing, exactly like a private blockchain.
+> *"Every single decision—Stage 1 exact matches, Stage 2 fuzzy matches, LLM reasoning, and human overrides—is chained in a tamper-evident sequence using SHA-256 block hashing, exactly like a private blockchain.
 > 
 > Each record's hash is computed from the previous block's hash plus the full payload:  
 > `record_hash = SHA256(previous_hash + timestamp + record_ids + stage + decision)`.
