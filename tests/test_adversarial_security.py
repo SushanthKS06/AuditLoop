@@ -87,12 +87,13 @@ class TestNumericAndSqlEdgeCases:
     
     def test_extreme_and_negative_amounts(self):
         """Verify handling of negative accounting values, zeroes, and formatted strings."""
-        assert self.matcher._normalize_amount("(5,432.10)") == -5432.10
-        assert self.matcher._normalize_amount("-₹10,000.50") == -10000.50
-        assert self.matcher._normalize_amount("0.00") == 0.0
+        from decimal import Decimal
+        assert self.matcher._normalize_amount("(5,432.10)") == Decimal('-5432.10')
+        assert self.matcher._normalize_amount("-₹10,000.50") == Decimal('-10000.50')
+        assert self.matcher._normalize_amount("0.00") == Decimal('0.00')
         assert self.matcher._normalize_amount(None) is None
         assert self.matcher._normalize_amount("invalid_amount_str") is None
-        assert self.matcher._normalize_amount("1000000000.99") == 1000000000.99
+        assert self.matcher._normalize_amount("1000000000.99") == Decimal('1000000000.99')
 
     def test_adversarial_arbitrary_amount_discrepancies(self):
         """Verify that 3%, 4%, and 5% arbitrary amount discrepancies (without matching fees) cannot auto-match."""

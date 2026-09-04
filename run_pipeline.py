@@ -47,14 +47,18 @@ class ReconciliationPipeline:
     It proposes but never commits - all proposals are re-verified.
     """
     
-    def __init__(self, use_llm: bool = True, force_disagreement_demo: bool = False):
+    def __init__(self, use_llm: bool = True, force_disagreement_demo: bool = False, run_id: Optional[str] = None):
         """
         Args:
             use_llm: Whether to invoke LLM for exceptions (default True)
             force_disagreement_demo: Ensure at least one disagreement case exists
+            run_id: Unique identifier for this pipeline execution
         """
         self.use_llm = use_llm
         self.force_disagreement_demo = force_disagreement_demo
+        import uuid
+        self.run_id = run_id or f"run_{uuid.uuid4().hex[:8]}"
+        self.batch_id = f"batch_{uuid.uuid4().hex[:8]}"
         
         # Initialize components
         self.audit_store = AuditStore()
@@ -300,8 +304,9 @@ class ReconciliationPipeline:
                 )
         
         # Save results
-        results_path = os.getenv("RESULTS_PATH", "results.json")
-        os.makedirs(os.path.dirname(results_path) or '.', exist_ok=True)
+        results_dir = os.path.join("runtime", "runs", self.run_id)
+        os.makedirs(results_dir, exist_ok=True)
+        results_path = os.path.join(results_dir, "results.json")
         with open(results_path, 'w') as f:
             json.dump(self.all_results, f, indent=2, default=str)
         print(f"  Results saved to {results_path}")
@@ -527,7 +532,9 @@ class ReconciliationPipeline:
                 num_records=num_records,
                 settlements_df=settlements_df if settlements_df is not None and len(settlements_df) == num_records else None,
                 output_dir="data",
-                force_disagreement=self.force_disagreement_demo
+                force_disagreement=self.force_disagreement_demo,
+                run_id=self.run_id,
+                batch_id=self.batch_id
             )
             if os.path.exists(settlements_path):
                 settlements_df = pd.read_csv(settlements_path)
@@ -554,8 +561,10 @@ def run_pipeline_cli():
     )
     parser.add_argument("--no-llm", action="store_true",
                         help="Disable LLM calls (all exceptions remain unresolved)")
-    parser.add_argument("--force-disagreement", action="store_true",
+    parser.add_argument("--demo-disagreement", action="store_true",
                         help="Force at least one disagreement case for demo")
+    parser.add_argument("--run-id", type=str, default=None,
+                        help="Unique identifier for this pipeline run")
     parser.add_argument("--records", type=int, default=80,
                         help="Number of records to generate if needed")
     parser.add_argument("--seed", type=int, default=42,
@@ -571,7 +580,8 @@ def run_pipeline_cli():
     
     pipeline = ReconciliationPipeline(
         use_llm=not args.no_llm,
-        force_disagreement_demo=args.force_disagreement
+        force_disagreement_demo=args.demo_disagreement,
+        run_id=args.run_id
     )
     
     results = pipeline.run(

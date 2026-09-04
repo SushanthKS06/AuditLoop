@@ -242,24 +242,31 @@ class ExceptionDispatcher:
             return False
         
         try:
-            sett_amount = float(sett_amount)
-            count_amount = float(count_amount)
-            sett_fee = float(sett_fee)
-        except (ValueError, TypeError):
+            from decimal import Decimal, InvalidOperation
+            
+            def to_dec(val):
+                if isinstance(val, Decimal):
+                    return val
+                return Decimal(str(val))
+                
+            sett_amount = to_dec(sett_amount)
+            count_amount = to_dec(count_amount)
+            sett_fee = to_dec(sett_fee)
+        except (ValueError, TypeError, InvalidOperation):
             return False
         
         # Check amount difference (stricter than initial fuzzy match)
-        amount_diff_pct = abs(sett_amount - count_amount) / max(sett_amount, count_amount, 1) * 100
+        amount_diff_pct = abs(sett_amount - count_amount) / max(sett_amount, count_amount, Decimal('1')) * Decimal('100')
         
         # Check if amount matches directly (<2%) or matches after standard fee deduction
         fee_adjusted_match = False
-        if abs((sett_amount + sett_fee) - count_amount) / max(count_amount, 1) * 100 <= 1.5:
+        if abs((sett_amount + sett_fee) - count_amount) / max(count_amount, Decimal('1')) * Decimal('100') <= Decimal('1.5'):
             fee_adjusted_match = True
-        elif 1.5 <= amount_diff_pct <= 3.5:
+        elif Decimal('1.5') <= amount_diff_pct <= Decimal('3.5'):
             # Standard MDR fee deduction range (2% + 18% GST = 2.36%)
             fee_adjusted_match = True
         
-        if amount_diff_pct > 2.0 and not fee_adjusted_match:
+        if amount_diff_pct > Decimal('2.0') and not fee_adjusted_match:
             return False
         
         # Check date proximity with robust timezone normalization

@@ -13,6 +13,7 @@ import json
 from typing import Optional, List, Dict
 import pandas as pd
 import streamlit as st
+import plotly.graph_objects as go
 
 # Add project root to path for clean package imports when run via Streamlit
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -187,6 +188,47 @@ def main():
             f"(coverage_mode=`{cov_mode}`). "
             + (f"{unv} record(s) had no ground-truth entry and were excluded from precision/recall/F1/FPR." if unv > 0 else "All records have a ground-truth entry.")
         )
+    
+    st.divider()
+    
+    # --- Reconciliation Funnel ---
+    st.subheader("Reconciliation Funnel")
+    tot_recs = metrics.get('total_records', 0)
+    
+    # Get counts by stage directly from audit store
+    stage_counts = {
+        'total': tot_recs,
+        'exact': 0,
+        'fuzzy': 0,
+        'llm_resolved': 0,
+        'unresolved': metrics.get('unresolved_count', 0),
+        'disagreements': metrics.get('disagreement_count', 0)
+    }
+    
+    if results:
+        exact_c = sum(1 for r in results if r.get('match_type') == 'exact')
+        fuzzy_c = sum(1 for r in results if r.get('match_type') in ('high_confidence', 'fuzzy'))
+        llm_c = sum(1 for r in results if r.get('match_type') == 'llm_verified')
+        
+        stage_counts['exact'] = exact_c
+        stage_counts['fuzzy'] = fuzzy_c
+        stage_counts['llm_resolved'] = llm_c
+        
+    fig = go.Figure(go.Funnel(
+        y=["Total Input Records", "Exact Match (Stage 1)", "Fuzzy Match (Stage 2)", "LLM Resolved (Stage 3)", "Unresolved Exceptions", "LLM/System Disagreements"],
+        x=[
+            stage_counts['total'],
+            stage_counts['exact'],
+            stage_counts['fuzzy'],
+            stage_counts['llm_resolved'],
+            stage_counts['unresolved'],
+            stage_counts['disagreements']
+        ],
+        textinfo="value+percent initial"
+    ))
+    
+    fig.update_layout(margin={"t": 30, "b": 30})
+    st.plotly_chart(fig, use_container_width=True)
     
     st.divider()
     

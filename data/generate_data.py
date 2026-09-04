@@ -51,7 +51,9 @@ class SyntheticDataGenerator:
         num_records: int = 80,
         settlements_df: Optional[pd.DataFrame] = None,
         output_dir: str = "data",
-        force_disagreement: bool = False
+        force_disagreement: bool = False,
+        run_id: Optional[str] = None,
+        batch_id: Optional[str] = None
     ) -> tuple:
         """
         Generate synthetic bank statement and internal ledger data.
@@ -83,13 +85,23 @@ class SyntheticDataGenerator:
         bank_records = []
         ledger_records = []
         
+        import uuid
+        run_id = run_id or f"run_{uuid.uuid4().hex[:8]}"
+        batch_id = batch_id or f"batch_{uuid.uuid4().hex[:8]}"
+        from datetime import timezone
+        ingestion_timestamp = datetime.now(timezone.utc).isoformat()
+        
         # Include existing real settlements
         for i, settlement in enumerate(real_settlements[:num_real]):
             settlement_copy = dict(settlement)
             settlement_copy['source'] = 'razorpay_test'
+            settlement_copy['run_id'] = run_id
+            settlement_copy['batch_id'] = batch_id
+            settlement_copy['ingestion_timestamp'] = ingestion_timestamp
+            
             settlement_records.append(settlement_copy)
             bank_rec, ledger_rec, gt_entry = self._generate_linked_record(
-                settlement_copy, index=i
+                settlement_copy, index=i, run_id=run_id, batch_id=batch_id, ingestion_timestamp=ingestion_timestamp
             )
             bank_records.append(bank_rec)
             ledger_records.append(ledger_rec)
@@ -124,7 +136,10 @@ class SyntheticDataGenerator:
                 'settled_at': (base_date + timedelta(days=1)).isoformat(),
                 'method': random.choice(['UPI', 'Card', 'Netbanking']),
                 'card_network': random.choice(['VISA', 'Mastercard', 'RuPay']),
-                'source': 'synthetic'
+                'source': 'synthetic',
+                'run_id': run_id,
+                'batch_id': batch_id,
+                'ingestion_timestamp': ingestion_timestamp
             }
             settlement_records.append(sett_rec)
             
@@ -140,7 +155,10 @@ class SyntheticDataGenerator:
                 fee=fee + tax,
                 settled_at=settled_at,
                 messiness_type=messiness_type,
-                source='synthetic'
+                source='synthetic',
+                run_id=run_id,
+                batch_id=batch_id,
+                ingestion_timestamp=ingestion_timestamp
             )
             bank_records.append(bank_rec)
             ledger_records.append(ledger_rec)
@@ -174,7 +192,10 @@ class SyntheticDataGenerator:
     def _generate_linked_record(
         self,
         settlement: Dict[str, Any],
-        index: int
+        index: int,
+        run_id: str = "",
+        batch_id: str = "",
+        ingestion_timestamp: str = ""
     ) -> tuple:
         """Generate bank/ledger records linked to a real settlement."""
         order_id = settlement.get('order_id', f'ORD_SYNTH_{index:04d}')
@@ -195,7 +216,10 @@ class SyntheticDataGenerator:
             fee=fee,
             settled_at=settled_at,
             messiness_type=messiness_type,
-            source='razorpay_test'
+            source='razorpay_test',
+            run_id=run_id,
+            batch_id=batch_id,
+            ingestion_timestamp=ingestion_timestamp
         )
         
         return bank_rec, ledger_rec, gt_entry
@@ -255,7 +279,10 @@ class SyntheticDataGenerator:
         fee: float,
         settled_at: str,
         messiness_type: str,
-        source: str
+        source: str,
+        run_id: str = "",
+        batch_id: str = "",
+        ingestion_timestamp: str = ""
     ) -> tuple:
         """Create a bank/ledger record pair with specified messiness."""
         
@@ -355,7 +382,10 @@ class SyntheticDataGenerator:
             'narration': bank_narration if bank_narration else '',
             'utr': bank_utr,
             'reference': bank_ref,
-            'source': source
+            'source': source,
+            'run_id': run_id,
+            'batch_id': batch_id,
+            'ingestion_timestamp': ingestion_timestamp
         }
         
         # Build ledger record
@@ -366,7 +396,10 @@ class SyntheticDataGenerator:
             'customer_ref': f"CUST_{random.randint(1000, 9999)}",
             'status': 'completed' if ledger_amount is not None else 'pending',
             'payment_id': payment_id,
-            'source': source
+            'source': source,
+            'run_id': run_id,
+            'batch_id': batch_id,
+            'ingestion_timestamp': ingestion_timestamp
         }
         
         # Build ground truth entry

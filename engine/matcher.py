@@ -56,20 +56,20 @@ class DeterministicMatcher:
         """Set callback for writing audit records."""
         self.audit_callback = callback
     
-    def _normalize_amount(self, amount: Any) -> Optional[float]:
+    def _normalize_amount(self, amount: Any) -> Optional[Decimal]:
         """
-        Normalize amount to high-precision float using Decimal and banker's rounding.
+        Normalize amount to high-precision Decimal using banker's rounding.
         Handles accounting parentheses (1,250.00) -> -1250.00, currency symbols, and commas.
         """
         if amount is None or pd.isna(amount):
             return None
-        if isinstance(amount, (int, float)):
+        if isinstance(amount, (int, float, Decimal)):
             # Normalize to 2 decimal places using Decimal banker's rounding
             try:
                 dec = Decimal(str(amount)).quantize(Decimal('0.01'), rounding=ROUND_HALF_EVEN)
-                return float(dec)
+                return dec
             except (InvalidOperation, ValueError):
-                return float(amount)
+                return Decimal(str(amount))
         try:
             cleaned = str(amount).strip()
             is_negative = False
@@ -83,8 +83,7 @@ class DeterministicMatcher:
             # Clean symbols, codes, and formatting
             cleaned = cleaned.replace(',', '').replace('₹', '').replace('$', '').replace('INR', '').replace('EUR', '').replace('GBP', '').strip()
             dec = Decimal(cleaned).quantize(Decimal('0.01'), rounding=ROUND_HALF_EVEN)
-            val = float(dec)
-            return -val if is_negative else val
+            return -dec if is_negative else dec
         except (InvalidOperation, ValueError, TypeError):
             return None
     
@@ -214,8 +213,10 @@ class DeterministicMatcher:
                         
                         # Guard: Stage 1 exact match requires amounts to be practically identical (or handled in Stage 2 if fee mismatch)
                         s_amt = self._normalize_amount(sett.get('settled_amount') if pd.notna(sett.get('settled_amount')) else sett.get('amount'))
-                        if s_amt is not None and abs(s_amt - b_amt) / max(s_amt, b_amt, 1) > (self.amount_threshold_pct / 100.0):
-                            continue
+                        if s_amt is not None:
+                            threshold = Decimal(str(self.amount_threshold_pct)) / Decimal('100.0')
+                            if abs(s_amt - b_amt) / max(s_amt, b_amt, Decimal('1')) > threshold:
+                                continue
 
                         matched_bank_row = b
                         rule_fired.append('utr_exact_match')
@@ -230,8 +231,10 @@ class DeterministicMatcher:
                             continue
                         
                         s_amt = self._normalize_amount(sett.get('settled_amount') if pd.notna(sett.get('settled_amount')) else sett.get('amount'))
-                        if s_amt is not None and abs(s_amt - b_amt) / max(s_amt, b_amt, 1) > (self.amount_threshold_pct / 100.0):
-                            continue
+                        if s_amt is not None:
+                            threshold = Decimal(str(self.amount_threshold_pct)) / Decimal('100.0')
+                            if abs(s_amt - b_amt) / max(s_amt, b_amt, Decimal('1')) > threshold:
+                                continue
 
                         # Guard: if both settlement and bank have non-empty UTRs and
                         # they DISAGREE, this bank row is an orphan/wrong counterpart.
@@ -257,8 +260,10 @@ class DeterministicMatcher:
                             continue
                         
                         s_gross = self._normalize_amount(sett.get('amount'))
-                        if s_gross is not None and abs(s_gross - l_amt) / max(s_gross, l_amt, 1) > (self.amount_threshold_pct / 100.0):
-                            continue
+                        if s_gross is not None:
+                            threshold = Decimal(str(self.amount_threshold_pct)) / Decimal('100.0')
+                            if abs(s_gross - l_amt) / max(s_gross, l_amt, Decimal('1')) > threshold:
+                                continue
 
                         matched_ledger_row = l
                         rule_fired.append('order_exact_match')
@@ -273,8 +278,10 @@ class DeterministicMatcher:
                             continue
                         
                         s_gross = self._normalize_amount(sett.get('amount'))
-                        if s_gross is not None and abs(s_gross - l_amt) / max(s_gross, l_amt, 1) > (self.amount_threshold_pct / 100.0):
-                            continue
+                        if s_gross is not None:
+                            threshold = Decimal(str(self.amount_threshold_pct)) / Decimal('100.0')
+                            if abs(s_gross - l_amt) / max(s_gross, l_amt, Decimal('1')) > threshold:
+                                continue
 
                         # Guard 2: if both settlement and ledger have an order_id and
                         # they DISAGREE, this is a duplicate-suspect / wrong-counterpart
@@ -516,13 +523,13 @@ class DeterministicMatcher:
     
     def _score_pair(
         self,
-        amount1: Optional[float],
+        amount1: Optional[Decimal],
         date1: Optional[datetime],
-        amount2: Optional[float],
+        amount2: Optional[Decimal],
         date2: Optional[datetime],
         text1: str,
         text2: str,
-        fee1: Optional[float] = None,
+        fee1: Optional[Decimal] = None,
         is_ledger: bool = False,
         order_id: str = ""
     ) -> Tuple[float, str]:
@@ -534,16 +541,27 @@ class DeterministicMatcher:
         """
         if amount1 is None or amount2 is None:
             return 0.0, "missing_amount"
+            
+        def to_dec(val):
+            if val is None:
+                return None
+            if isinstance(val, Decimal):
+                return val
+            return Decimal(str(val))
+            
+        amount1 = to_dec(amount1)
+        amount2 = to_dec(amount2)
+        fee1 = to_dec(fee1)
         
         # Amount similarity (40% weight)
-        amount_diff_pct = abs(amount1 - amount2) / max(amount1, amount2, 1) * 100
+        amount_diff_pct = float(abs(amount1 - amount2) / max(amount1, amount2, Decimal('1')) * Decimal('100'))
         
         amount_score = 0.0
         fee_rule_triggered = False
         
         if amount_diff_pct <= self.amount_threshold_pct:
             amount_score = 1.0
-        elif is_ledger and fee1 is not None and abs((amount1 + fee1) - amount2) / max(amount2, 1) * 100 <= 1.0:
+        elif is_ledger and fee1 is not None and float(abs((amount1 + fee1) - amount2) / max(amount2, Decimal('1')) * Decimal('100')) <= 1.0:
             # Net settlement + explicit fee matches gross ledger amount exactly
             amount_score = 0.98
             fee_rule_triggered = True

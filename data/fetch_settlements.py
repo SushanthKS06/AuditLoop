@@ -114,19 +114,21 @@ class RazorpayReconClient:
         """
         normalized = []
         
+        from decimal import Decimal
+        
         for record in records:
             row = {
                 'entity_id': record.get('entity_id', ''),
                 'type': record.get('type', ''),
                 'payment_id': record.get('payment_id', ''),
                 'order_id': record.get('order_id', ''),
-                'amount': float(record.get('amount', 0)) / 100,  # Convert paise to rupees
-                'fee': float(record.get('fee', 0)) / 100 if record.get('fee') else 0.0,
-                'tax': float(record.get('tax', 0)) / 100 if record.get('tax') else 0.0,
+                'amount': Decimal(str(record.get('amount', 0))) / Decimal('100'),  # Convert paise to rupees
+                'fee': Decimal(str(record.get('fee', 0))) / Decimal('100') if record.get('fee') else Decimal('0.0'),
+                'tax': Decimal(str(record.get('tax', 0))) / Decimal('100') if record.get('tax') else Decimal('0.0'),
                 'currency': record.get('currency', 'INR'),
-                'settled_amount': float(record.get('settled', 0)) / 100,
-                'debit': float(record.get('debit', 0)) / 100 if record.get('debit') else None,
-                'credit': float(record.get('credit', 0)) / 100 if record.get('credit') else None,
+                'settled_amount': Decimal(str(record.get('settled', 0))) / Decimal('100'),
+                'debit': Decimal(str(record.get('debit', 0))) / Decimal('100') if record.get('debit') else None,
+                'credit': Decimal(str(record.get('credit', 0))) / Decimal('100') if record.get('credit') else None,
                 'settlement_id': record.get('settlement_id', ''),
                 'settlement_utr': record.get('settlement_utr', ''),
                 'created_at': record.get('created_at', ''),
