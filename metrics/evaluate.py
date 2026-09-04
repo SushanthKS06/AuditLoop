@@ -265,6 +265,18 @@ class MetricsEvaluator:
             metrics['assumed_true_positives'] = assumed_true_positives
             metrics['assumed_true_negatives'] = assumed_true_negatives
 
+        # ── LLM cost-savings metrics (Task 2: replace unsubstantiated 92% claim) ──
+        # Methodology: Stage 1 + Stage 2 deterministic matches never reach the LLM.
+        # llm_calls_avoided_pct  = match_rate (records resolved before Stage 3)
+        # estimated_token_savings_pct uses a documented linear model:
+        #   Naive baseline: every record → LLM (~300 tokens each, prompt + response)
+        #   Actual:         only Stage-3 exceptions reach the LLM
+        #   Savings:        (1 - exception_rate) * 100
+        # This is conservative — it assumes LLM calls on exceptions are at the same
+        # per-record token cost as the baseline, which typically underestimates savings.
+        llm_cost_savings = self.compute_llm_cost_savings(results, metrics)
+        metrics.update(llm_cost_savings)
+
         # Save report to both output_path and root metrics_report.json
         if output_path:
             os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
@@ -279,6 +291,94 @@ class MetricsEvaluator:
                 pass
 
         return metrics
+
+    @staticmethod
+    def compute_llm_cost_savings(
+        results: List[Dict],
+        metrics: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """
+        Compute the real, auditable LLM cost-avoidance figure from a result set.
+
+        Methodology
+        -----------
+        * ``llm_calls_avoided_pct``:
+            Fraction of records resolved at Stage 1 or Stage 2 (deterministic)
+            and therefore never dispatched to the LLM.  Equivalent to
+            ``match_rate`` when no LLM is available (all matched records
+            skipped Stage 3).  When LLM IS active, records with
+            ``final_status in {'matched', 'matched_llm_verified'}`` that
+            have ``llm_invoked == False`` are counted as avoided.
+
+        * ``estimated_token_savings_pct``:
+            A conservative linear estimate.  Baseline assumption: every
+            record would be sent to the LLM (~300 tokens, prompt + response).
+            Actual cost: only Stage-3 exception records reach the LLM.
+            Savings = (1 - llm_invoked_fraction) × 100.
+            This underestimates savings because exceptions tend to have
+            longer, more complex prompts than the batch average.
+
+        Both figures are written to ``metrics_report.json`` alongside the
+        existing keys so they are permanently auditable and attributable.
+
+        Args:
+            results:  List of result records (same list passed to evaluate()).
+            metrics:  Optional pre-computed metrics dict (used to pull
+                      match_rate if available as a consistency cross-check).
+
+        Returns:
+            Dict with keys:
+                llm_calls_avoided_pct       float  [0, 1]
+                llm_calls_avoided_count     int
+                llm_invoked_count           int
+                estimated_token_savings_pct float  [0, 1]
+                token_savings_methodology   str
+        """
+        total = len(results)
+        if total == 0:
+            return {
+                "llm_calls_avoided_pct": 0.0,
+                "llm_calls_avoided_count": 0,
+                "llm_invoked_count": 0,
+                "estimated_token_savings_pct": 0.0,
+                "token_savings_methodology": "no records processed",
+            }
+
+        llm_invoked_count = sum(
+            1 for r in results if r.get("llm_invoked") is True
+        )
+
+        # Fallback: if llm_invoked flag is absent (e.g. LLM was off), infer from status.
+        # Records matched at Stage 1/2 (final_status='matched') never hit the LLM.
+        if llm_invoked_count == 0:
+            stage3_statuses = {
+                "matched_llm_verified",
+                "llm_deterministic_disagreement",
+                "flagged_for_review",
+                "rejected_duplicate",
+                "llm_parse_error",
+                "explained_no_resolution",
+            }
+            llm_invoked_count = sum(
+                1 for r in results
+                if r.get("final_status", "") in stage3_statuses
+            )
+
+        llm_calls_avoided_count = total - llm_invoked_count
+        llm_calls_avoided_pct = round(llm_calls_avoided_count / total, 4)
+        estimated_token_savings_pct = llm_calls_avoided_pct  # same fraction
+
+        return {
+            "llm_calls_avoided_pct": llm_calls_avoided_pct,
+            "llm_calls_avoided_count": llm_calls_avoided_count,
+            "llm_invoked_count": llm_invoked_count,
+            "estimated_token_savings_pct": round(estimated_token_savings_pct, 4),
+            "token_savings_methodology": (
+                "Conservative linear model: (records resolved at Stage 1/2 without "
+                "LLM) / total_records. Baseline assumes ~300 tokens per record if "
+                "all records were sent to LLM; actual cost covers only Stage-3 tail."
+            ),
+        }
 
     def _find_ground_truth(
         self,

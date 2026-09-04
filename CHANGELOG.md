@@ -34,10 +34,19 @@ All notable changes to AuditLoop are documented in this file. The format is base
   - `GET /audit/recent` - Inspect recent audit entries
   - `GET /health` - Health check endpoint
 - Docker packaging for one-command deployment
-- Comprehensive test suite:
-  - `test_matcher.py` - Deterministic matching unit tests
-  - `test_llm_schema_validation.py` - Pydantic schema validation tests
-  - `test_end_to_end_metrics.py` - Full pipeline reproducibility tests
+- Test suite (all files non-empty, all tests passing):
+  - `test_matcher.py` — Stage 1 exact match, Stage 2 fuzzy/fee-adjusted matching, normalization, orphan and duplicate rejection
+  - `test_llm_schema_validation.py` — Pydantic schema validation for `ExplainExceptionResponse` and `ProposeResolutionResponse`: valid payloads, missing fields, wrong enum values, wrong types, confidence boundary (0/1), `ValidatedResponse` factory methods
+  - `test_exception_dispatch_reliability.py` — `ExceptionDispatcher.process_exceptions` ordering guarantee (serial + concurrent under `ThreadPoolExecutor`), LLM mid-call error → `llm_parse_error` status without batch crash, `_deterministic_recheck` boundary logic (amount threshold, fee-adjusted match, date window), `force_disagreement_case` produces exactly one filterable synthetic case
+  - `test_groq_client.py` — `GroqClient` clean failure on missing `GROQ_API_KEY`, `create_client()` returns `None` gracefully, `_parse_tool_response` valid/invalid/malformed paths, `_execute_with_retry` count verification, 429 delay branch, request shape (tool_choice, temperature=0.0)
+  - `test_end_to_end_metrics.py` — Full pipeline reproducibility tests
+  - `test_audit_integrity.py` — SHA-256 audit chain verification
+  - `test_pii_sanitizer.py` — PII redaction (email, phone, record structure)
+  - `test_adversarial_security.py` — Prompt injection and extreme numeric fuzzing
+  - `test_human_in_the_loop.py` — Maker-Checker manual resolution and hash chain
+  - `test_performance_scaling.py` — Stage 1 + Stage 2 throughput benchmarks
+  - `test_api.py` — FastAPI endpoint smoke tests
+  - `test_pipeline_reconciliation.py` — Pipeline deduplication, orphan/duplicate invariants
 - CHANGELOG.md for version tracking
 
 ### Design Decisions

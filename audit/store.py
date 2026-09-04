@@ -20,9 +20,11 @@ class AuditStore:
     Design decision: Append-only with cryptographic chaining ensures we can reconstruct 
     the full history of how each decision was made and mathematically prove zero tampering, 
     which is critical for:
-    1. Explaining decisions to auditors (SOC2, RBI compliance)
+    1. Explaining decisions to auditors — provides the tamper-evident foundation that
+       compliance workflows (e.g. SOC2, RBI reporting) depend on; certification itself
+       is a separate organizational process.
     2. Debugging false positives/negatives
-    3. Meeting institutional fintech compliance requirements
+    3. Meeting institutional fintech audit-trail requirements
     """
     
     GENESIS_HASH = "0" * 64

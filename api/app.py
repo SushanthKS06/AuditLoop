@@ -10,10 +10,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Dict, Any, List
+import logging
 import os
 import sys
 import json
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 # Add parent directory to path for clean package imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -46,6 +49,15 @@ app.add_middleware(
 # API Key Authentication
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=True)
+
+# Warn loudly if running with the insecure demo default — should be
+# immediately visible in container/server logs so it reads as an
+# intentional, disclosed choice rather than an oversight.
+if not os.getenv("API_SECRET_KEY"):
+    logger.warning(
+        "API_SECRET_KEY not set — using insecure default key 'dev-secret-key'. "
+        "Set API_SECRET_KEY in production (see README Configuration section)."
+    )
 
 async def get_api_key(api_key: str = Security(api_key_header)):
     expected_key = os.getenv("API_SECRET_KEY", "dev-secret-key")

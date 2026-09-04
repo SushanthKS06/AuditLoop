@@ -189,6 +189,7 @@ python run_pipeline.py --force-disagreement --records 56
 | `RAZORPAY_KEY_SECRET` | Razorpay test-mode API secret | No (falls back to sample batch) |
 | `GROQ_API_KEY` | Groq API key for LLaMA 3.3 70B exception reasoning | No (LLM disabled if missing) |
 | `GROQ_MODEL` | Groq model identifier (default: `llama-3.3-70b-versatile`) | No |
+| `API_SECRET_KEY` | API key for FastAPI REST authentication | No (**demo default: `dev-secret-key`** — set in production; a startup warning is logged when unset) |
 
 ## Running Tests
 

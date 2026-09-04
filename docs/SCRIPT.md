@@ -16,7 +16,7 @@
 | **1:30 - 3:00** | **Live Pipeline Demo** | Streamlit Dashboard & Terminal | Stage 1 ($O(N+M+L)$ hash match), Stage 2 (fuzzy fee scoring), Stage 3 (Groq LLaMA 3.3 structured reasoning). |
 | **3:00 - 3:45** | **Failure Recovery & Disagreements** | Disagreements Tab & HITL Form | Fail-closed demonstration: LLM hallucination caught and stopped cold. Maker-checker human sign-off. |
 | **3:45 - 4:30** | **Cryptographic Auditability & Metrics** | `/audit/verify` API & SHA-256 Tab | Mathematical tamper-evidence with SHA-256 block hashing; ground truth metrics ($>90\%$ precision). |
-| **4:30 - 5:00** | **Enterprise Scale & Closing** | API Docs & Terminal benchmarks | Scalable hash indexing, 92% token cost reduction, SOC2/RBI audit-ready. |
+| **4:30 - 5:00** | **Enterprise Scale & Closing** | API Docs & Terminal benchmarks | Scalable hash indexing, ~84% of records resolved at zero LLM cost, tamper-evident audit chain. |
 
 ---
 
@@ -88,16 +88,18 @@
 > `record_hash = SHA256(previous_hash + timestamp + record_ids + stage + decision)`.
 > 
 > If an internal DBA attempts to modify a row in SQLite or PostgreSQL, the cryptographic chain instantly breaks. 
-> Our automated `/audit/verify` REST endpoint recomputes hashes from genesis to head and guarantees 100% tamper-evident compliance for RBI and SOC-2 audits."*
+> Our automated `/audit/verify` REST endpoint recomputes hashes from genesis to head — providing the tamper-evident cryptographic foundation that compliance workflows like SOC2 or RBI reporting require. (Certification itself is a separate organizational process; we provide the audit-trail primitive it depends on.)
+> 
+> On the metrics side: the ground truth is generated alongside the synthetic batch by the same deterministic generator — this is disclosed, not hidden. The choice is deliberate: we wanted a verifiable, reproducible answer key rather than running the demo on unlabeled or cherry-picked data. The `messiness_ratio=0.40` parameter is what injects genuine ambiguity and prevents the scores from being trivially perfect. Every number on this dashboard is machine-computed against that answer key."*
 
 ---
 
 ### 6. Production Readiness & Closing (4:30 - 5:00)
 **[Visual: Show FastAPI Swagger docs at `http://localhost:8000/docs` and Docker Compose]**
 
-> *"AuditLoop is packaged with a production-grade FastAPI REST API, a 39-test automated test suite passing in under 8 seconds, and one-command Docker deployment.
+> *"AuditLoop is packaged with a production-grade FastAPI REST API, a full automated test suite, and one-command Docker deployment.
 > 
-> By running deterministic matching first, we cut LLM API costs by **92%** and scale linearly with indexed inputs.
+> By running deterministic matching first, ~**84%** of records are resolved at zero LLM cost — the LLM is only invoked on the unresolved tail. *(Computed from `match_rate` in `metrics_report.json`; methodology: records resolved at Stage 1/2 ÷ total records.)*
 > 
 > AuditLoop bridges the gap between state-of-the-art Generative AI and the strict mathematical guarantees required by modern finance. Thank you."*
 
