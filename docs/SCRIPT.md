@@ -51,15 +51,11 @@
 ---
 
 ### 3. Live Pipeline Execution & Dashboard (1:30 - 3:00)
-**[Visual: Run `python run_pipeline.py --force-disagreement --records 20` in terminal, then switch to Streamlit Dashboard]**
+**[Visual: Run `python run_pipeline.py --demo-disagreement --no-llm --records 20 --seed 42` in terminal, then switch to Streamlit Dashboard]**
 
-> *"Let's see it live. We run a batch of 20 live-linked multi-source transactions (24 reconciliation events) with injected anomalies: settlement delays, gateway fee deductions, and duplicate amounts.
+> *"Let's see it live. We run a batch of 20 synthetic settlements. Orphan bank/ledger events are shown separately so they cannot inflate transaction metrics."*
 > 
-> Notice how fast Stage 1 and 2 execute: ~66.7% of records are matched in milliseconds at **zero LLM token cost** — on a batch with messiness_ratio=0.40 deliberately injecting high ambiguity, routing the remaining 33.3% to Stage 3 reasoning and human review is an intentional safety feature.
-> 
-> Now let's open the AuditLoop Reviewer Dashboard.
-> Right at the top, we see our institutional metrics calculated mathematically against a known ground-truth answer key—not cherry-picked demo data.
-> We simply read the numbers live off the dashboard—typically demonstrating 93.8% precision and 88.2% recall scores directly driven by the live reconciliation."*
+> Notice Stage 1 and Stage 2 are deterministic. Remaining exceptions go to LLM proposal + verifier, or stay unresolved. Read the live `metrics_report.json` denominators rather than memorizing a score.
 
 ---
 
@@ -97,7 +93,7 @@
 ### 6. Production Readiness & Closing (4:30 - 5:00)
 **[Visual: Show FastAPI Swagger docs at `http://localhost:8000/docs` and Docker Compose]**
 
-> *"AuditLoop is packaged with a production-grade FastAPI REST API, a full automated test suite, and one-command Docker deployment.
+> *"AuditLoop is packaged as a buildathon-ready prototype FastAPI service, an automated test suite, and Docker Compose profiles.
 > 
 > By running deterministic matching first, ~**66.7%** of records are resolved at zero LLM cost — the LLM is only invoked on the unresolved tail. *(Computed from `match_rate` in `metrics_report.json`; methodology: records resolved at Stage 1/2 ÷ total records.)*
 > 

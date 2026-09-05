@@ -2,45 +2,33 @@
 PII Privacy and Data Sanitization Layer
 
 Sanitizes financial reconciliation records before sending them to external LLM APIs.
-Redacts personal identifiable information (PII) including:
+This is field-and-regex redaction, not universal DLP.
+
+Redacts:
   - Email addresses
   - Indian phone numbers
   - PAN card numbers (AAAAA9999A format)
   - Bank account numbers (10-18 contiguous digits)
   - IFSC codes (XXXX0XXXXXX format)
   - UPI VPA handles (handle@provider)
-  - Customer names, contact information
+  - Card-like 13–19 digit grouped numbers
+  - Beneficiary / customer name fields
+  - Nested dicts and lists (unknown future fields included)
 
-Preserves essential matching keys (entity IDs, order IDs, UTRs, amounts, dates)
-so downstream deterministic comparisons remain valid.
+Preserves essential matching keys (entity IDs, order IDs, UTRs, amounts, dates).
 """
 
 import re
-from typing import Dict, Any, Optional
+from typing import Any, Dict, List, Optional, Union
 
 
-# ── Regex patterns for sensitive identifiers ───────────────────────────────
-
-# Email addresses
 EMAIL_REGEX = re.compile(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+')
-
-# Indian mobile numbers (10-digit starting with 6-9, optional +91 prefix)
 PHONE_REGEX = re.compile(r'(?:\+91[\-\s]?)?[6789]\d{9}')
-
-# PAN card: 5 alpha + 4 digit + 1 alpha (e.g. ABCDE1234F)
 PAN_REGEX = re.compile(r'\b[A-Z]{5}[0-9]{4}[A-Z]\b')
-
-# Bank account numbers: 10 to 18 contiguous digits (not already part of a longer number)
 BANK_ACCOUNT_REGEX = re.compile(r'(?<!\d)\d{10,18}(?!\d)')
-
-# IFSC code: 4 alpha + 0 + 6 alphanumeric (e.g. HDFC0001234)
 IFSC_REGEX = re.compile(r'\b[A-Z]{4}0[A-Z0-9]{6}\b')
-
-# UPI VPA: word@word (guards against matching order IDs which use / not @)
 UPI_VPA_REGEX = re.compile(r'\b[\w.\-]+@[a-zA-Z]{2,}\b')
-
-
-# ── Field-name blocklist (exact key matches) ───────────────────────────────
+CARD_REGEX = re.compile(r'\b(?:\d{4}[-\s]?){3}\d{1,7}\b')
 
 _PII_EXACT_FIELDS = frozenset({
     'customer_name', 'beneficiary_name', 'name',
@@ -50,67 +38,57 @@ _PII_EXACT_FIELDS = frozenset({
     'pan', 'pan_number',
     'account_number', 'bank_account', 'bank_account_number',
     'ifsc', 'ifsc_code',
+    'card_number', 'card_pan', 'beneficiary_id', 'customer_id',
 })
+
+_PII_KEY_SUBSTRINGS = (
+    'email', 'phone', 'mobile', 'pan', 'ifsc', 'vpa', 'upi',
+    'account', 'card', 'beneficiary', 'customer_name',
+)
 
 
 def sanitize_text(text: Optional[str]) -> str:
-    """
-    Sanitize raw narration or freeform text by redacting PII patterns.
-
-    Applies regex-based redaction for:
-    - Email addresses → [REDACTED_EMAIL]
-    - Indian phone numbers → [REDACTED_PHONE]
-    - PAN numbers → [REDACTED_PAN]
-    - Bank account numbers (10-18 digits) → [REDACTED_ACCOUNT]
-    - IFSC codes → [REDACTED_IFSC]
-    - UPI VPA handles → [REDACTED_VPA]
-
-    Args:
-        text: Input string potentially containing PII
-
-    Returns:
-        Redacted string with PII replaced by safe placeholder tokens
-    """
     if not text:
         return ""
 
     s = str(text)
-    # Order matters: apply more-specific patterns first to avoid partial matches.
     s = PAN_REGEX.sub("[REDACTED_PAN]", s)
     s = IFSC_REGEX.sub("[REDACTED_IFSC]", s)
     s = EMAIL_REGEX.sub("[REDACTED_EMAIL]", s)
     s = PHONE_REGEX.sub("[REDACTED_PHONE]", s)
-    # UPI VPA after email so @-patterns already redacted don't double-match
     s = UPI_VPA_REGEX.sub("[REDACTED_VPA]", s)
+    s = CARD_REGEX.sub("[REDACTED_CARD]", s)
     s = BANK_ACCOUNT_REGEX.sub("[REDACTED_ACCOUNT]", s)
-
     return s
 
 
+def _key_looks_sensitive(key: str) -> bool:
+    k = key.lower()
+    if k in _PII_EXACT_FIELDS:
+        return True
+    return any(token in k for token in _PII_KEY_SUBSTRINGS)
+
+
+def sanitize_value(value: Any, key: str = "") -> Any:
+    """Sanitize an arbitrary JSON-like value (string, dict, list, scalar)."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return sanitize_record_for_llm(value)
+    if isinstance(value, list):
+        return [sanitize_value(item, key) for item in value]
+    if isinstance(value, str):
+        if _key_looks_sensitive(key) and key.lower() != 'customer_ref':
+            return "[REDACTED_PII]"
+        return sanitize_text(value)
+    return value
+
+
 def sanitize_record_for_llm(record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """
-    Produce a sanitized, privacy-safe copy of a financial record for LLM context.
-
-    Preserves:
-    - Entity IDs, Order IDs, Payment IDs, UTRs (needed for correlation)
-    - Numerical amounts, fees, taxes, settled amounts
-    - ISO timestamps and dates
-
-    Redacts/Masks:
-    - Fields in _PII_EXACT_FIELDS → [REDACTED_PII]
-    - customer_ref → CUST_[REDACTED]
-    - Freeform narration and all other string fields → regex-based scrub
-
-    Args:
-        record: Raw transaction dictionary
-
-    Returns:
-        Sanitized transaction dictionary safe for external LLM dispatch.
-    """
     if not record:
         return None
 
-    clean = {}
+    clean: Dict[str, Any] = {}
     for k, v in record.items():
         if v is None:
             clean[k] = None
@@ -118,19 +96,20 @@ def sanitize_record_for_llm(record: Optional[Dict[str, Any]]) -> Optional[Dict[s
 
         k_lower = k.lower()
 
-        # Exact field-name blocklist (case-insensitive key match)
         if k_lower in _PII_EXACT_FIELDS:
             clean[k] = "[REDACTED_PII]"
         elif k_lower == 'customer_ref':
             clean[k] = "CUST_[REDACTED]"
-        elif k_lower == 'narration':
-            # Narration is high-risk freeform text
-            clean[k] = sanitize_text(str(v))
+        elif isinstance(v, dict):
+            clean[k] = sanitize_record_for_llm(v)
+        elif isinstance(v, list):
+            clean[k] = [sanitize_value(item, k) for item in v]
         elif isinstance(v, str):
-            # Apply regex scrub to all other string values
-            clean[k] = sanitize_text(v)
+            if _key_looks_sensitive(k) and k_lower not in ('customer_ref',):
+                clean[k] = "[REDACTED_PII]"
+            else:
+                clean[k] = sanitize_text(v)
         else:
-            # Non-string values (int, float, bool, list, dict) pass through unchanged
             clean[k] = v
 
     return clean

@@ -216,7 +216,8 @@ class DeterministicMatcher:
                         s_amt = self._normalize_amount(sett.get('settled_amount') if pd.notna(sett.get('settled_amount')) else sett.get('amount'))
                         if s_amt is not None:
                             threshold = Decimal(str(self.amount_threshold_pct)) / Decimal('100.0')
-                            if abs(s_amt - b_amt) / max(s_amt, b_amt, Decimal('1')) > threshold:
+                            denom = max(abs(s_amt), abs(b_amt), Decimal('0.01'))
+                            if abs(s_amt - b_amt) / denom > threshold:
                                 continue
 
                         matched_bank_row = b
@@ -234,7 +235,8 @@ class DeterministicMatcher:
                         s_amt = self._normalize_amount(sett.get('settled_amount') if pd.notna(sett.get('settled_amount')) else sett.get('amount'))
                         if s_amt is not None:
                             threshold = Decimal(str(self.amount_threshold_pct)) / Decimal('100.0')
-                            if abs(s_amt - b_amt) / max(s_amt, b_amt, Decimal('1')) > threshold:
+                            denom = max(abs(s_amt), abs(b_amt), Decimal('0.01'))
+                            if abs(s_amt - b_amt) / denom > threshold:
                                 continue
 
                         # Guard: if both settlement and bank have non-empty UTRs and
@@ -263,7 +265,7 @@ class DeterministicMatcher:
                         s_gross = self._normalize_amount(sett.get('amount'))
                         if s_gross is not None:
                             threshold = Decimal(str(self.amount_threshold_pct)) / Decimal('100.0')
-                            if abs(s_gross - l_amt) / max(s_gross, l_amt, Decimal('1')) > threshold:
+                            if abs(s_gross - l_amt) / max(abs(s_gross), abs(l_amt), Decimal('0.01')) > threshold:
                                 continue
 
                         matched_ledger_row = l
@@ -281,7 +283,7 @@ class DeterministicMatcher:
                         s_gross = self._normalize_amount(sett.get('amount'))
                         if s_gross is not None:
                             threshold = Decimal(str(self.amount_threshold_pct)) / Decimal('100.0')
-                            if abs(s_gross - l_amt) / max(s_gross, l_amt, Decimal('1')) > threshold:
+                            if abs(s_gross - l_amt) / max(abs(s_gross), abs(l_amt), Decimal('0.01')) > threshold:
                                 continue
 
                         # Guard 2: if both settlement and ledger have an order_id and
@@ -296,46 +298,73 @@ class DeterministicMatcher:
                         rule_fired.append('payment_id_ledger_match')
                         break
             
-            # Require bank leg for ANY match
-            if matched_bank_row is not None:
-                match_type = 'exact_3way' if matched_ledger_row is not None else 'exact_utr'
-                
+            # Full 3-way match only. Missing bank or missing ledger cannot
+            # become a committed match — counterparts stay unmatched for Stage 2/3.
+            if matched_bank_row is not None and matched_ledger_row is not None:
+                s_net = self._normalize_amount(sett.get('settled_amount') if pd.notna(sett.get('settled_amount')) else sett.get('amount'))
+                s_gross = self._normalize_amount(sett.get('amount'))
+                s_fee = self._normalize_amount(sett.get('fee')) or Decimal('0')
+                b_amt = self._normalize_amount(matched_bank_row.get('amount'))
+                l_amt = self._normalize_amount(matched_ledger_row.get('expected_amount'))
+
+                # Currency disagreement cannot be an exact match.
+                sett_ccy = self._normalize_text(sett.get('currency', ''))
+                bank_ccy = self._normalize_text(matched_bank_row.get('currency', '')) if matched_bank_row is not None else ''
+                led_ccy = self._normalize_text(matched_ledger_row.get('currency', '')) if matched_ledger_row is not None else ''
+                ccy_present = [c for c in (sett_ccy, bank_ccy, led_ccy) if c]
+                if len(set(ccy_present)) > 1:
+                    matched_bank_row = None
+                    matched_ledger_row = None
+                if b_amt is not None and l_amt is not None and b_amt != 0 and l_amt != 0:
+                    if (b_amt > 0) != (l_amt > 0):
+                        matched_bank_row = None
+                        matched_ledger_row = None
+
+                # Unexplained gross vs net gap (partial refund / split) is not a Stage-1 match.
+                if matched_bank_row is not None and s_gross is not None and s_net is not None:
+                    gap = abs(s_gross - s_net)
+                    explained = abs(gap - abs(s_fee))
+                    if gap > Decimal('0.05') and explained / max(abs(s_gross), Decimal('0.01')) > Decimal('0.02'):
+                        matched_bank_row = None
+                        matched_ledger_row = None
+
+            if matched_bank_row is not None and matched_ledger_row is not None:
                 sett_dict = sett.to_dict()
-                src = sett_dict.get('source') or (matched_bank_row.get('source') if matched_bank_row is not None else None) or (matched_ledger_row.get('source') if matched_ledger_row is not None else None) or 'synthetic'
+                src = (
+                    sett_dict.get('source')
+                    or matched_bank_row.get('source')
+                    or matched_ledger_row.get('source')
+                    or 'synthetic'
+                )
                 
                 match_record = {
                     'settlement': sett_dict,
-                    'bank': matched_bank_row.to_dict() if matched_bank_row is not None else None,
-                    'ledger': matched_ledger_row.to_dict() if matched_ledger_row is not None else None,
-                    'match_type': match_type,
+                    'bank': matched_bank_row.to_dict(),
+                    'ledger': matched_ledger_row.to_dict(),
+                    'match_type': 'exact_3way',
                     'confidence': 1.0,
                     'rule_fired': "+".join(rule_fired) if rule_fired else 'exact_match',
-                    'final_status': 'matched',
+                    'final_status': ReconciliationState.EXACT_MATCH.value,
                     'source': src,
                     'forced_demo_case': False
                 }
                 matched_records.append(match_record)
                 matched_settlement_ids.add(sett.name)
-                
-                if matched_bank_row is not None:
-                    matched_bank_ids.add(matched_bank_row.name)
-                if matched_ledger_row is not None:
-                    matched_ledger_ids.add(matched_ledger_row.name)
+                matched_bank_ids.add(matched_bank_row.name)
+                matched_ledger_ids.add(matched_ledger_row.name)
                 
                 record_id_parts = [str(sett.get('entity_id') or sett.get('payment_id') or '')]
-                if matched_bank_row is not None:
-                    record_id_parts.append(str(matched_bank_row.get('txn_id', '')))
-                if matched_ledger_row is not None:
-                    record_id_parts.append(str(matched_ledger_row.get('order_id', '')))
+                record_id_parts.append(str(matched_bank_row.get('txn_id', '')))
+                record_id_parts.append(str(matched_ledger_row.get('order_id', '')))
                 
                 audit_records.append({
                     'record_ids': "-".join(filter(None, record_id_parts)),
                     'stage': 'stage1_exact',
                     'rule_fired': "+".join(rule_fired) if rule_fired else 'exact_match',
                     'confidence': 1.0,
-                    'decision': 'matched',
-                    'match_type': match_type,
-                    'final_status': 'matched',
+                    'decision': ReconciliationState.EXACT_MATCH.value,
+                    'match_type': 'exact_3way',
+                    'final_status': ReconciliationState.EXACT_MATCH.value,
                     'source': src,
                     'forced_demo_case': False
                 })
@@ -425,7 +454,9 @@ class DeterministicMatcher:
                     b_entry['amount'], b_entry['date'],
                     sett.get('settlement_utr', ''), b_entry['narration'],
                     fee1=sett_fee, is_ledger=False,
-                    order_id=sett.get('order_id', '')
+                    order_id=sett.get('order_id', ''),
+                    ccy1=self._normalize_text(sett.get('currency', '')),
+                    ccy2=self._normalize_text(b_entry['row'].get('currency', ''))
                 )
                 
                 if score > best_bank_score:
@@ -442,7 +473,9 @@ class DeterministicMatcher:
                     sett_amount, sett_date,
                     l_entry['amount'], l_entry['date'],
                     sett.get('order_id', ''), l_entry['order_id'],
-                    fee1=sett_fee, is_ledger=True
+                    fee1=sett_fee, is_ledger=True,
+                    ccy1=self._normalize_text(sett.get('currency', '')),
+                    ccy2=self._normalize_text(l_entry['row'].get('currency', ''))
                 )
                 
                 if score > best_ledger_score:
@@ -464,28 +497,22 @@ class DeterministicMatcher:
                     match_record['match_type'] = 'fuzzy_3way'
                     match_record['confidence'] = round(min(best_bank_score, best_ledger_score), 4)
                     match_record['rule_fired'] = f"{best_bank_rule}_and_{best_ledger_rule}"
-                    match_record['final_status'] = 'matched'
+                    match_record['final_status'] = ReconciliationState.FUZZY_MATCH.value
                     matched_records.append(match_record)
-                    decision = 'matched'
+                    decision = ReconciliationState.FUZZY_MATCH.value
                     matched_bank_ids.add(best_bank_match.name)
                     matched_ledger_ids.add(best_ledger_match.name)
                     matched_settlement_ids.add(sett.name)
-                elif has_bank:
-                    match_record['match_type'] = 'fuzzy_bank'
-                    match_record['confidence'] = round(best_bank_score, 4)
-                    match_record['rule_fired'] = best_bank_rule
-                    match_record['final_status'] = 'matched'
-                    matched_records.append(match_record)
-                    decision = 'matched'
-                    matched_bank_ids.add(best_bank_match.name)
-                    matched_settlement_ids.add(sett.name)
                 else:
-                    match_record['match_type'] = 'fuzzy_ledger' if match_record['ledger'] else 'fuzzy_bank'
+                    match_record['match_type'] = 'fuzzy_incomplete'
                     match_record['confidence'] = round(max(best_bank_score, best_ledger_score), 4)
                     match_record['rule_fired'] = best_ledger_rule if match_record['ledger'] else best_bank_rule
-                    match_record['final_status'] = 'low_confidence'
+                    if has_bank or has_ledger:
+                        match_record['final_status'] = ReconciliationState.INCOMPLETE_COUNTERPARTS.value
+                    else:
+                        match_record['final_status'] = ReconciliationState.LOW_CONFIDENCE.value
                     low_confidence_records.append(match_record)
-                    decision = 'low_confidence'
+                    decision = match_record['final_status']
                 
                 fuzzy_src = sett.get('source') or (match_record['bank'].get('source') if match_record['bank'] else None) or (match_record['ledger'].get('source') if match_record['ledger'] else None) or 'synthetic'
                 match_record['source'] = fuzzy_src
@@ -532,7 +559,9 @@ class DeterministicMatcher:
         text2: str,
         fee1: Optional[Decimal] = None,
         is_ledger: bool = False,
-        order_id: str = ""
+        order_id: str = "",
+        ccy1: str = "",
+        ccy2: str = ""
     ) -> Tuple[float, str]:
         """
         Score a potential match pair with fee deduction awareness.
@@ -555,14 +584,18 @@ class DeterministicMatcher:
         fee1 = to_dec(fee1)
         
         # Amount similarity (40% weight)
-        amount_diff_pct = float(abs(amount1 - amount2) / max(amount1, amount2, Decimal('1')) * Decimal('100'))
+        amount_diff_pct = float(
+            abs(amount1 - amount2) / max(abs(amount1), abs(amount2), Decimal('0.01')) * Decimal('100')
+        )
         
         amount_score = 0.0
         fee_rule_triggered = False
         
-        if amount_diff_pct <= self.amount_threshold_pct:
+        if ccy1 and ccy2 and ccy1 != ccy2:
+            amount_score = 0.0
+        elif amount_diff_pct <= self.amount_threshold_pct:
             amount_score = 1.0
-        elif is_ledger and fee1 is not None and float(abs((amount1 + fee1) - amount2) / max(amount2, Decimal('1')) * Decimal('100')) <= 1.0:
+        elif is_ledger and fee1 is not None and float(abs((amount1 + fee1) - amount2) / max(abs(amount2), Decimal('0.01')) * Decimal('100')) <= 1.0:
             # Net settlement + explicit fee matches gross ledger amount exactly
             amount_score = 0.98
             fee_rule_triggered = True
@@ -643,23 +676,24 @@ class DeterministicMatcher:
         if not low_confidence.empty:
             for _, row in low_confidence.iterrows():
                 sett = row.get('settlement', {}) or {}
-                count = row.get('bank') or row.get('ledger') or {}
+                bank = row.get('bank') if isinstance(row.get('bank'), dict) else None
+                ledger = row.get('ledger') if isinstance(row.get('ledger'), dict) else None
+                count = bank or ledger or {}
                 sett_id = str(sett.get('entity_id') or sett.get('payment_id') or sett.get('settlement_id') or '')
                 count_id = str(count.get('txn_id') or count.get('order_id') or count.get('payment_id') or count.get('customer_ref') or count.get('utr') or '')
                 rec_id = f"{sett_id}-{count_id}" if sett_id and count_id else (sett_id or count_id)
                 src = sett.get('source') or count.get('source') or 'synthetic'
-                # Track whether a bank leg is present in the exception record.
-                # 3-way reconciliation requires: settlement + bank + ledger.
-                # If the counterpart is a ledger entry (no bank), has_bank_leg=False.
-                has_bank = row.get('bank') is not None and not (
-                    isinstance(row.get('bank'), dict) and not row.get('bank')
-                )
+                has_bank = bool(bank)
+                has_ledger = bool(ledger)
                 exceptions.append({
-                    'type': ReconciliationState.LOW_CONFIDENCE.value,
+                    'type': row.get('final_status') or ReconciliationState.LOW_CONFIDENCE.value,
                     'record_ids': rec_id,
                     'settlement': sett,
-                    'counterpart': count,
+                    'bank': bank,
+                    'ledger': ledger,
+                    'counterpart': count or None,
                     'has_bank_leg': has_bank,
+                    'has_ledger_leg': has_ledger,
                     'confidence': row.get('confidence', 0),
                     'rule_fired': row.get('rule_fired', ''),
                     'source': src,
@@ -674,7 +708,11 @@ class DeterministicMatcher:
                     'type': ReconciliationState.UNMATCHED_SETTLEMENT.value,
                     'record_ids': str(r.get('entity_id') or r.get('payment_id') or r.get('settlement_id') or ''),
                     'settlement': r,
+                    'bank': None,
+                    'ledger': None,
                     'counterpart': None,
+                    'has_bank_leg': False,
+                    'has_ledger_leg': False,
                     'confidence': 0.0,
                     'rule_fired': 'no_candidate_found',
                     'source': r.get('source', 'synthetic'),
@@ -689,7 +727,11 @@ class DeterministicMatcher:
                     'type': ReconciliationState.UNMATCHED_BANK.value,
                     'record_ids': str(r.get('txn_id') or r.get('utr') or ''),
                     'settlement': None,
+                    'bank': r,
+                    'ledger': None,
                     'counterpart': r,
+                    'has_bank_leg': True,
+                    'has_ledger_leg': False,
                     'confidence': 0.0,
                     'rule_fired': 'no_candidate_found',
                     'source': r.get('source', 'synthetic'),
@@ -704,7 +746,11 @@ class DeterministicMatcher:
                     'type': ReconciliationState.UNMATCHED_LEDGER.value,
                     'record_ids': str(r.get('order_id') or r.get('payment_id') or r.get('customer_ref') or ''),
                     'settlement': None,
+                    'bank': None,
+                    'ledger': r,
                     'counterpart': r,
+                    'has_bank_leg': False,
+                    'has_ledger_leg': True,
                     'confidence': 0.0,
                     'rule_fired': 'no_candidate_found',
                     'source': r.get('source', 'synthetic'),

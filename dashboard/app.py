@@ -114,7 +114,7 @@ def main():
         )
     
     # Ground-truth coverage — always visible so it can never be silently assumed
-    gt_total = metrics.get('total_records', 0)
+    gt_total = metrics.get('total_input_transactions', metrics.get('total_records', 0))
     gt_unverified = metrics.get('unverified_count', 0)
     gt_scored = gt_total - gt_unverified
     gt_coverage_pct = metrics.get('ground_truth_coverage', 0) * 100
@@ -133,8 +133,8 @@ def main():
     
     with col5:
         st.metric(
-            "Total Records",
-            metrics.get('total_records', 0)
+            "Input transactions",
+            metrics.get('total_input_transactions', metrics.get('total_records', 0))
         )
     
     with col6:
@@ -155,6 +155,20 @@ def main():
             "Unresolved",
             metrics.get('unresolved_count', 0)
         )
+
+    o1, o2, o3, o4 = st.columns(4)
+    with o1:
+        st.metric("Orphan bank", metrics.get('orphan_bank_records', 0))
+    with o2:
+        st.metric("Orphan ledger", metrics.get('orphan_ledger_records', 0))
+    with o3:
+        st.metric("Duplicates", metrics.get('duplicate_suspects', 0))
+    with o4:
+        st.metric("Demo-injected", metrics.get('demo_injected_count', 0))
+    if metrics.get('demo_mode'):
+        st.warning("Demo mode: forced disagreement events are tagged and excluded from organic TP/FP/FN.")
+    else:
+        st.caption("Benchmark/organic mode: no demo-injected events in this metrics file.")
     
     # Expandable raw ground truth metrics breakdown
     with st.expander("Ground-Truth & Secondary Metrics Breakdown", expanded=False):
@@ -180,7 +194,7 @@ def main():
         cov_mode = metrics.get('coverage_mode', 'strict')
         cov_pct = metrics.get('ground_truth_coverage', 0) * 100
         unv = metrics.get('unverified_count', 0)
-        tot = metrics.get('total_records', 0)
+        tot = metrics.get('total_input_transactions', metrics.get('total_records', 0))
         scored = tot - unv
         st.caption(
             f"Ground-truth coverage: **{scored} of {tot} records ({cov_pct:.1f}%)** — "
@@ -193,7 +207,7 @@ def main():
     
     # --- Reconciliation Funnel ---
     st.subheader("Reconciliation Funnel")
-    tot_recs = metrics.get('total_records', 0)
+    tot_recs = metrics.get('total_input_transactions', metrics.get('total_records', 0))
     
     # Get counts by stage directly from audit store
     stage_counts = {
@@ -249,7 +263,9 @@ def main():
                     'type': r.get('type', ''),
                     'confidence': r.get('confidence', 0),
                     'demo_flag': "🚨 FORCED DEMO" if r.get('forced_demo_case') else "standard",
-                    'llm_root_cause': r.get('llm_root_cause', ''),
+                    'llm_proposal': r.get('llm_proposed_action', ''),
+                    'deterministic_recheck': r.get('deterministic_recheck_passed', ''),
+                    'rejection_reason': r.get('rejection_reason', ''),
                 }
                 flat_results.append(flat)
             
@@ -350,8 +366,9 @@ def main():
                     st.write("**Rule Fired:**", d.get('rule_fired', ''))
                     st.write("**Confidence:**", d.get('confidence', ''))
                     st.write("**Decision:**", d.get('decision', ''))
-                    st.write("**LLM Reasoning:**", d.get('llm_reasoning', ''))
-                    st.warning("This case was flagged for human review due to LLM-deterministic disagreement.")
+                    st.write("**LLM proposal:**", d.get('decision', ''), "| reasoning:", d.get('llm_reasoning', ''))
+                    st.write("**Deterministic verification:** rejected if this row is a disagreement")
+                    st.write("**Final decision:**", d.get('final_status', d.get('decision', '')))
                     
                     # Maker-checker action directly on disagreement
                     with st.form(key=f"disagree_resolve_{i}"):

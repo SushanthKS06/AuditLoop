@@ -34,8 +34,8 @@ class TestApiEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "healthy"
-        assert data["version"] == "1.0.0"
-        assert "timestamp" in data
+        assert data["llm_status"] in ("not_configured", "configured", "degraded", "unavailable", "healthy")
+        assert data["llm_status"] != "connected"
     
     def test_reconcile_endpoint_no_llm(self, client):
         """Test POST /reconcile runs pipeline without LLM and returns metrics."""
@@ -43,7 +43,7 @@ class TestApiEndpoints:
             "records": 20,
             "seed": 42,
             "messiness": 0.2,
-            "force_disagreement": True,
+            "demo_disagreement": True,
             "use_llm": False
         }
         response = client.post("/reconcile", json=payload)
@@ -62,7 +62,7 @@ class TestApiEndpoints:
         response = client.post("/reconcile", json=payload)
         assert response.status_code == 400
         data = response.json()
-        assert "Path traversal detected" in data["detail"] or "Filename" in data["detail"] or "Path must resolve" in data["detail"]
+        assert "Path traversal detected" in str(data["detail"]) or "Filename" in str(data["detail"]) or "Path must resolve" in str(data["detail"])
     
     def test_metrics_endpoint(self, client):
         """Test GET /metrics returns the computed metrics report."""

@@ -130,7 +130,7 @@ uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
 
 ## Quick Start
 
-> **Record Count Note:** All Quick Start workflows and evaluation benchmarks canonically process **20 settlement records** (derived from the 20 live Razorpay test-mode settlements in `data/settlements_live.csv` and matched 1-to-1 in `data/ground_truth.json`). In multi-source generation, this produces 24 reconciliation events across bank, ledger, and gateway legs.
+> **Record Count Note:** Default Quick Start and evaluation commands use **20 synthetic settlement records**. Orphan bank/ledger events are counted separately and do **not** inflate the transaction evaluation population. The bundled CSVs under `data/` are a **reproducible synthetic snapshot** (`source=synthetic`). They are not live Razorpay production data. The ingestion layer can consume Razorpay test-mode settlement data when `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` are configured.
 
 ### Option 1: Docker (Recommended - Zero Setup)
 
@@ -221,22 +221,20 @@ pytest tests/test_end_to_end_metrics.py -v
 
 ## Key Metrics Explained
 
-All headline metrics (precision, recall, F1) are computed in **strict coverage
-mode**: only records that have a matching entry in `data/ground_truth.json` are
-scored. Records without a ground-truth entry are excluded and counted as
-`unverified_count`. The dashboard always displays `ground_truth_coverage` next
-to the metrics so this number is never silently assumed.
+All headline metrics (precision, recall, F1) are computed on **input settlements** as the evaluation unit. Orphan bank rows, orphan ledger rows, and duplicate-suspect events are reported separately. Demo-injected disagreements (`forced_demo_case`) are excluded from TP/FP/FN.
 
-*Note: The ground truth and test data share the same generator. The pipeline intentionally uses a high `messiness_ratio` parameter (0.40) to inject genuine ambiguities and edge cases into the batch, making the resulting precision and recall scores meaningful rather than trivially perfect.*
+The dashboard shows `total_input_transactions`, `evaluated_transactions`, and `ground_truth_coverage` so denominators are never implied.
 
-| Metric | What It Means | Target / Verified Benchmark |
-|--------|---------------|-----------------------------|
-| **Match Rate** | % of records successfully reconciled | ~66.7% (16/24 on messiness=0.40; >80% on clean batches) |
-| **Precision** | Of verified matches, how many are correct against ground truth | 93.8% (15/16 true positive matches) |
-| **Recall** | Of all true matches in ground truth, how many did we find | 88.2% (15/17 true matches recovered) |
-| **Disagreement Rate** | LLM vs deterministic conflicts | 0.0% (clean run) / 4.2% (forced demo case) |
-| **Unresolved Rate** | Exceptions needing human review | 16.7% (4 of 24 records routed to human controller) |
-| **Ground-Truth Coverage** | Fraction of the processed batch that has a verified ground-truth label (not coverage of the GT file) | 1.0 (100.0% — 24 of 24 records verified against 20-entry GT file) |
+Numbers below are **illustrative of a past local run**, not hardcoded product claims. Re-run `python run_pipeline.py --no-llm --records 20 --seed 42` and read `metrics_report.json`.
+
+| Metric | What It Means | How it is computed |
+|--------|---------------|---------------------|
+| **Input transactions** | Settlement rows in the original input set | `len(settlements)` |
+| **Evaluated transactions** | Input settlements that have a ground-truth label | input − unverified |
+| **Precision** | TP / (TP + FP) over evaluated settlements | from `metrics_report.json` |
+| **Recall** | TP / (TP + FN) over evaluated settlements | from `metrics_report.json` |
+| **Orphan bank / ledger** | Unmatched bank or ledger events | excluded from the transaction denominator |
+| **Demo-injected count** | Forced disagreement rows | excluded from organic TP/FP/FN |
 
 > **Note on `reviewer_id` attribution:** The `reviewer_id` field in `/audit/resolve` is an **attribution display label** (e.g. employee ID) supplied in the request body for human review assignment and audit-trail record keeping. It is **not** a cryptographically verified identity — this prototype uses a single shared API key for authentication. In a production deployment, `reviewer_id` should be bound to an authenticated principal (e.g. OAuth2 sub claim). See `audit/store.py::resolve_exception` docstring.
 
@@ -249,9 +247,8 @@ numbers from scratch (same seed → same output):
 
 ```bash
 # Step 1: Rebuild ground truth and synthetic data (same seed as pipeline)
-# N=20 matches the 20 real settlements in data/settlements_live.csv.
-# Using a larger N generates unlabeled synthetic-only records and lowers
-# ground_truth_coverage below 1.0 — always use the same N in both commands.
+# N=20 is the default synthetic batch size used by the CLI.
+# Using a larger N without regenerating ground truth lowers coverage.
 python data/build_ground_truth.py --records 20 --seed 42
 
 # Step 2: Run the full reconciliation pipeline
@@ -287,7 +284,7 @@ To guarantee at least one LLM-vs-deterministic disagreement is visible in every 
 
 ## Reproducibility
 
-Because `fetch_settlements.py` caches the live Razorpay API pull to a local CSV snapshot (`data/settlements_live.csv`), the entire pipeline is fully deterministic and reproducible as long as you use the same snapshot and seed.
+Because `generate_data.py` writes a local CSV snapshot, the pipeline is deterministic for a given seed and snapshot. `fetch_settlements.py` only runs when Razorpay test-mode keys are present.
 
 ```bash
 # Same seed + same snapshot = same results (proves determinism)
@@ -301,19 +298,22 @@ python run_pipeline.py --seed 456 --records 20
 
 ## Synthetic Data Disclosure
 
-Because no public sandboxes exist that supply multi-party reconciliation data (i.e. where a Razorpay API test settlement natively corresponds to a mock ICICI bank statement and a mock internal ERP ledger), AuditLoop leverages a robust synthetic data generator (`data/generate_data.py`). 
+Because no public sandboxes exist that supply multi-party reconciliation data (a Razorpay test settlement does not natively correspond to a mock bank statement and ERP ledger), AuditLoop ships a reproducible **synthetic** generator (`data/generate_data.py`).
 
-The generator explicitly links to live Razorpay Test-Mode Settlement data (if API keys are provided) and generates the corresponding Bank and Ledger counterparts. This ensures the matching engine is tested on realistic data volumes and anomalies (fees, taxes, fuzzy dates) while preserving the integrity of the evaluation.
+The repository includes a reproducible synthetic benchmark dataset. The ingestion layer can consume Razorpay test-mode settlement data when configured. Bundled `data/settlements_live.csv` rows in this snapshot are tagged `source=synthetic`.
 
 ## Data Provenance
 
 Every row in `data/settlements_live.csv`, `data/bank_statement.csv`, and
-`data/internal_ledger.csv` carries a `source` column with one of two values:
+`data/internal_ledger.csv` carries a `source` column:
 
 | Value | Meaning |
 |-------|---------|
-| `razorpay_test` | Fetched from Razorpay's test-mode Settlement Recon API (`data/fetch_settlements.py`) |
-| `synthetic` | Fully synthetic record generated by `data/generate_data.py` |
+| `synthetic` | Generated by `data/generate_data.py` (this is the bundled snapshot) |
+| `razorpay_test` | Fetched from Razorpay test-mode Settlement Recon API when keys are configured |
+| `benchmark_fixture` | Hand-authored adversarial case |
+
+**This bundled snapshot is synthetic.** It is not live Razorpay production data and it is not a verified Razorpay test-mode dump unless you fetch one yourself.
 
 **How to verify per-row provenance from the data files:**
 

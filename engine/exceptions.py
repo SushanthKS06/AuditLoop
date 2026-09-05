@@ -17,7 +17,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional
 import threading
+from decimal import Decimal, InvalidOperation
+from datetime import datetime, timezone
+
 from engine.states import ReconciliationState
+from engine.context import ReconciliationContext
+from engine.matcher import DeterministicMatcher
 
 
 class ExceptionDispatcher:
@@ -51,7 +56,7 @@ class ExceptionDispatcher:
     def process_exceptions(
         self,
         exceptions: List[Dict],
-        force_disagreement_case: bool = False,
+        demo_disagreement_case: bool = False,
         concurrent: bool = True
     ) -> List[Dict]:
         """
@@ -59,7 +64,7 @@ class ExceptionDispatcher:
         
         Args:
             exceptions: List of exception records from matcher
-            force_disagreement_case: If True, ensure at least one disagreement case exists for demo
+            demo_disagreement_case: If True, ensure at least one disagreement case exists for demo
             concurrent: Whether to parallelize LLM network calls across worker threads
             
         Returns:
@@ -70,7 +75,7 @@ class ExceptionDispatcher:
             
         processed = [None] * len(exceptions)
         has_disagreement = False
-        forced_idx = len(exceptions) // 2 if force_disagreement_case else -1
+        forced_idx = len(exceptions) // 2 if demo_disagreement_case else -1
         
         def _worker(idx: int, exc: Dict) -> tuple:
             # Stagger dispatches slightly to avoid sudden burst rate-limits
@@ -155,29 +160,41 @@ class ExceptionDispatcher:
             result['llm_root_cause'] = explanation_result.get('root_cause')
             result['llm_explanation'] = explanation_result.get('explanation')
             result['llm_confidence'] = explanation_result.get('confidence')
-            
-            # Step 2: Get LLM resolution proposal (if we have both records)
-            if exception.get('settlement') and exception.get('counterpart'):
+
+            ctx = ReconciliationContext.from_exception(exception)
+
+            # Step 2: Get LLM resolution proposal when at least one counterpart exists
+            counterpart_for_llm = exception.get('counterpart')
+            if counterpart_for_llm is None:
+                if ctx.bank_present():
+                    counterpart_for_llm = ctx.bank
+                elif ctx.ledger_present():
+                    counterpart_for_llm = ctx.ledger
+
+            if exception.get('settlement') and counterpart_for_llm:
                 proposal_result = self.llm_client.propose_resolution(
                     record_a=exception.get('settlement'),
-                    record_b=exception.get('counterpart')
+                    record_b=counterpart_for_llm
                 )
                 
                 if proposal_result and proposal_result.get('valid'):
                     result['llm_proposed_action'] = proposal_result.get('action')
                     result['llm_proposal_reasoning'] = proposal_result.get('reasoning')
-                    
-                    # Step 3: CRITICAL - Re-verify LLM match proposals deterministically
-                    if proposal_result.get('action') == 'match':
-                        recheck_passed = self._deterministic_recheck(
-                            exception.get('settlement'),
-                            exception.get('counterpart'),
-                            exception_context=exception  # carries has_bank_leg flag
-                        )
+                    result['llm_confidence'] = proposal_result.get('confidence', result.get('llm_confidence'))
+
+                    llm_conf = float(result['llm_confidence'] or 0)
+                    if llm_conf < 0.5:
+                        result['final_status'] = ReconciliationState.LOW_CONFIDENCE.value
+                        result['deterministic_recheck_passed'] = False
+                        result['rejection_reason'] = 'llm_low_confidence'
+                    elif proposal_result.get('action') == 'match':
+                        recheck_passed, reason = self._verify_context(ctx)
                         result['deterministic_recheck_passed'] = recheck_passed
-                        
+                        result['rejection_reason'] = None if recheck_passed else reason
                         if recheck_passed:
                             result['final_status'] = ReconciliationState.MATCHED_LLM_VERIFIED.value
+                        elif reason == 'incomplete_counterparts':
+                            result['final_status'] = ReconciliationState.INCOMPLETE_COUNTERPARTS.value
                         else:
                             result['final_status'] = ReconciliationState.LLM_DETERMINISTIC_DISAGREEMENT.value
                     elif proposal_result.get('action') == 'flag_for_human':
@@ -190,14 +207,17 @@ class ExceptionDispatcher:
                     result['final_status'] = ReconciliationState.LLM_PARSE_ERROR.value
                     result['llm_error_detail'] = proposal_result.get('error', 'Unknown proposal error') if proposal_result else 'Null proposal result'
             else:
-                # No counterpart to compare - can only explain, not resolve
                 if explanation_result.get('confidence', 0) >= 0.8:
                     result['final_status'] = ReconciliationState.EXPLAINED_NO_RESOLUTION.value
                 else:
                     result['final_status'] = ReconciliationState.UNRESOLVED_EXCEPTION.value
         
         except Exception as e:
-            result['final_status'] = ReconciliationState.LLM_PARSE_ERROR.value
+            err = str(e).lower()
+            if any(tok in err for tok in ('timeout', '429', 'rate limit', 'connection', 'unavailable', '503')):
+                result['final_status'] = ReconciliationState.LLM_PROVIDER_FAILURE.value
+            else:
+                result['final_status'] = ReconciliationState.LLM_PARSE_ERROR.value
             result['llm_error_detail'] = str(e)
         
         return result
@@ -230,33 +250,9 @@ class ExceptionDispatcher:
         settlement: Optional[Dict],
         counterpart: Optional[Dict]
     ) -> bool:
-        """
-        Invariant gate: verify that enough counterpart data exists to confirm a match.
-
-        A full 3-way reconciliation requires all three legs:
-          settlement + bank + ledger
-
-        At Stage 3 exceptions we only receive the settlement and one counterpart
-        (either bank or ledger, whichever was available).  If that counterpart is
-        None *or* has no amount field, we cannot confirm a match and must return
-        False immediately — BEFORE any numeric comparison.
-
-        This prevents the scenario where:
-          1. A settlement has no bank record (orphan)
-          2. The LLM incorrectly proposes action='match'
-          3. _deterministic_recheck accidentally passes on edge-case amounts
-          4. The result is promoted to 'matched_llm_verified'
-
-        Returns:
-            True only when both settlement and counterpart carry the minimum
-            required fields for a deterministic numeric comparison.
-        """
-        if not settlement:
+        """Legacy helper: two-record presence. Prefer ReconciliationContext."""
+        if not settlement or not counterpart:
             return False
-        if not counterpart:
-            return False
-
-        # Settlement must have at least one amount field
         sett_amount = (
             settlement.get('settled_amount')
             if settlement.get('settled_amount') is not None
@@ -264,8 +260,6 @@ class ExceptionDispatcher:
         )
         if sett_amount is None:
             return False
-
-        # Counterpart must have at least one amount field
         count_amount = (
             counterpart.get('amount')
             if counterpart.get('amount') is not None
@@ -273,7 +267,6 @@ class ExceptionDispatcher:
         )
         if count_amount is None:
             return False
-
         return True
 
     def _deterministic_recheck(
@@ -283,106 +276,113 @@ class ExceptionDispatcher:
         exception_context: Optional[Dict] = None
     ) -> bool:
         """
-        Re-verify an LLM-proposed match using deterministic rules.
+        Backward-compatible wrapper. New callers should use _verify_context.
 
-        WHY: The LLM can propose, but never commit. This is the core
-        differentiator - we don't trust the LLM with unilateral authority
-        over financial decisions.
+        Returns True only when a full 3-way context can be assembled and
+        the verifier accepts it. A two-record pair without both bank and
+        ledger legs always returns False.
+        """
+        payload = dict(exception_context or {})
+        payload.setdefault('settlement', settlement)
+        payload.setdefault('counterpart', counterpart)
+        ctx = ReconciliationContext.from_exception(payload)
+        if settlement and not ctx.settlement:
+            ctx.settlement = settlement
+        if counterpart:
+            if not ctx.bank_present() and not ctx.ledger_present():
+                # Infer leg type from fields
+                if counterpart.get('expected_amount') is not None or counterpart.get('order_id'):
+                    ctx.ledger = counterpart
+                else:
+                    ctx.bank = counterpart
+        passed, _reason = self._verify_context(ctx)
+        return passed
 
-        The first check is the counterpart-presence invariant: if the
-        settlement has no counterpart (bank or ledger leg is missing), the
-        recheck MUST return False regardless of LLM confidence. Missing legs
-        can never form a fully reconciled match.
+    def _verify_context(self, ctx: ReconciliationContext) -> tuple:
+        """
+        Deterministic 3-way verifier.
 
-        Bank-leg requirement: A 3-way reconciliation requires settlement +
-        bank + ledger.  If the exception was raised because the bank leg was
-        absent (has_bank_leg=False in exception_context), then even a ledger-
-        side counterpart cannot satisfy the 3-way condition.  We reject.
+        Asks:
+          Are all required counterparts present?
+          Do IDs agree?
+          Do amounts agree (Decimal, fee-aware)?
+          Do currencies agree?
+          Do dates satisfy policy?
+          Does the proposed interpretation violate an invariant?
 
         Returns:
-            True if the deterministic re-check confirms the match
+            (passed: bool, reason: str)
         """
-        # ── INVARIANT GATE ────────────────────────────────────────────────
-        # Enforce: missing counterpart → never matched_llm_verified.
-        # This must be checked BEFORE any numeric comparison so that an
-        # orphan record with a None counterpart cannot accidentally pass.
-        if not self._all_required_counterparts_present(settlement, counterpart):
-            return False
+        if not ctx.all_required_legs_present():
+            return False, "incomplete_counterparts"
 
-        # ── BANK LEG REQUIREMENT ──────────────────────────────────────────
-        # 3-way reconciliation: settlement + BANK + ledger are all required.
-        # If the exception record explicitly records has_bank_leg=False, the
-        # bank transaction was never present and the match cannot be confirmed.
-        if exception_context is not None:
-            has_bank_leg = exception_context.get('has_bank_leg')
-            if has_bank_leg is False:
-                # No bank leg confirmed — cannot satisfy 3-way requirement
-                return False
+        matcher = DeterministicMatcher()
+        settlement = ctx.settlement
+        bank = ctx.bank
+        ledger = ctx.ledger
 
-        # Extract amounts
-        sett_amount = settlement.get('settled_amount') if settlement.get('settled_amount') is not None else settlement.get('amount')
-        count_amount = counterpart.get('amount') if counterpart.get('amount') is not None else counterpart.get('expected_amount')
-        sett_fee = settlement.get('fee', 0.0) or 0.0
-        
-        if sett_amount is None or count_amount is None:
-            return False
-        
-        try:
-            from decimal import Decimal, InvalidOperation
-            
-            def to_dec(val):
-                if isinstance(val, Decimal):
-                    return val
-                return Decimal(str(val))
+        sett_net = matcher._normalize_amount(
+            settlement.get('settled_amount') if settlement.get('settled_amount') is not None else settlement.get('amount')
+        )
+        sett_gross = matcher._normalize_amount(settlement.get('amount'))
+        sett_fee = matcher._normalize_amount(settlement.get('fee')) or Decimal('0')
+        bank_amt = matcher._normalize_amount(bank.get('amount'))
+        ledger_amt = matcher._normalize_amount(ledger.get('expected_amount'))
+
+        if sett_net is None or bank_amt is None or ledger_amt is None:
+            return False, "missing_amount"
+
+        def _rel(a: Decimal, b: Decimal) -> Decimal:
+            return abs(a - b) / max(abs(a), abs(b), Decimal('0.01')) * Decimal('100')
+
+        # Bank vs settlement net (or fee-adjusted)
+        bank_diff = _rel(sett_net, bank_amt)
+        fee_ok = False
+        if sett_fee:
+            fee_ok = _rel(sett_net + sett_fee, bank_amt) <= Decimal('1.5') or _rel(sett_gross or sett_net, bank_amt) <= Decimal('1.5')
+        if bank_diff > Decimal('2.0') and not fee_ok:
+            # Allow standard MDR band 1.5–3.5% only when fee is consistent
+            if not (Decimal('1.5') <= bank_diff <= Decimal('3.5')):
+                return False, "amount_mismatch_bank"
+
+        # Ledger vs settlement gross
+        gross = sett_gross if sett_gross is not None else (sett_net + sett_fee)
+        ledger_diff = _rel(gross, ledger_amt)
+        if ledger_diff > Decimal('2.0'):
+            if not (sett_fee and _rel(sett_net + sett_fee, ledger_amt) <= Decimal('1.5')):
+                return False, "amount_mismatch_ledger"
                 
-            sett_amount = to_dec(sett_amount)
-            count_amount = to_dec(count_amount)
-            sett_fee = to_dec(sett_fee)
-        except (ValueError, TypeError, InvalidOperation):
-            return False
-        
-        # Check amount difference (stricter than initial fuzzy match)
-        amount_diff_pct = abs(sett_amount - count_amount) / max(sett_amount, count_amount, Decimal('1')) * Decimal('100')
-        
-        # Check if amount matches directly (<2%) or matches after standard fee deduction
-        fee_adjusted_match = False
-        if abs((sett_amount + sett_fee) - count_amount) / max(count_amount, Decimal('1')) * Decimal('100') <= Decimal('1.5'):
-            fee_adjusted_match = True
-        elif Decimal('1.5') <= amount_diff_pct <= Decimal('3.5'):
-            # Standard MDR fee deduction range (2% + 18% GST = 2.36%)
-            fee_adjusted_match = True
-        
-        if amount_diff_pct > Decimal('2.0') and not fee_adjusted_match:
-            return False
-        
-        # Check date proximity with robust timezone normalization
-        sett_date_str = settlement.get('settled_at') or settlement.get('created_at')
-        count_date_str = counterpart.get('value_date') or counterpart.get('order_date')
-        
-        if sett_date_str and count_date_str:
-            try:
-                from datetime import datetime, timezone
-                
-                def _parse_dt(d):
-                    if isinstance(d, datetime):
-                        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
-                    s = str(d).replace('Z', '+00:00').strip()
-                    try:
-                        dt = datetime.fromisoformat(s)
-                        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-                    except ValueError:
-                        dt = datetime.strptime(s.split()[0].split('+')[0].strip(), '%Y-%m-%d')
-                        return dt.replace(tzinfo=timezone.utc)
-                
-                sett_date = _parse_dt(sett_date_str)
-                count_date = _parse_dt(count_date_str)
-                date_diff = abs((sett_date - count_date).days)
-                
-                if date_diff > 5:  # Stricter than initial window
-                    return False
-            except Exception:
-                # Fail closed on unparseable dates
-                return False
-        
-        # Passed deterministic re-check
-        return True
+        # Sign check: Bank and Ledger must have same sign (or be zero)
+        if bank_amt != 0 and ledger_amt != 0 and (bank_amt > 0) != (ledger_amt > 0):
+            return False, "sign_mismatch"
+
+        # Currency
+        sett_ccy = str(settlement.get('currency') or '').strip().upper()
+        bank_ccy = str(bank.get('currency') or '').strip().upper()
+        ledger_ccy = str(ledger.get('currency') or '').strip().upper()
+        present_ccy = [c for c in (sett_ccy, bank_ccy, ledger_ccy) if c]
+        if len(set(present_ccy)) > 1:
+            return False, "currency_mismatch"
+
+        # Identifiers: conflicting non-empty UTRs / order_ids
+        sett_utr = matcher._normalize_text(settlement.get('settlement_utr', ''))
+        bank_utr = matcher._normalize_text(bank.get('utr', ''))
+        if sett_utr and bank_utr and sett_utr != bank_utr:
+            return False, "identifier_conflict_utr"
+
+        sett_order = matcher._normalize_text(settlement.get('order_id', ''))
+        ledger_order = matcher._normalize_text(ledger.get('order_id', ''))
+        if sett_order and ledger_order and sett_order != ledger_order:
+            return False, "identifier_conflict_order"
+
+        # Dates
+        sett_date = matcher._normalize_date(settlement.get('settled_at') or settlement.get('created_at'))
+        bank_date = matcher._normalize_date(bank.get('value_date'))
+        ledger_date = matcher._normalize_date(ledger.get('order_date'))
+        for other in (bank_date, ledger_date):
+            if sett_date and other:
+                if abs((sett_date - other).days) > 5:
+                    return False, "date_window_exceeded"
+
+        return True, "verified"
+

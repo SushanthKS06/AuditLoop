@@ -91,16 +91,21 @@ def sample_ledger():
 class TestStage1ExactMatch:
     """Test Stage 1 exact matching."""
     
-    def test_exact_utr_match(self, matcher, sample_settlements, sample_bank):
-        """Test that matching UTRs are found."""
-        ledger = pd.DataFrame()  # Empty ledger
-        
-        matched, _, _, _, audits = matcher.stage1_exact_match(
+    def test_exact_utr_match_requires_ledger(self, matcher, sample_settlements, sample_bank):
+        """Bank-only UTR agreement is not a full 3-way match."""
+        ledger = pd.DataFrame()
+        matched, unmatched_sett, _, _, audits = matcher.stage1_exact_match(
             sample_settlements, sample_bank, ledger
         )
-        
-        assert len(matched) == 2  # Both should match on UTR
-        assert all(m['match_type'] == 'exact_utr' for _, m in matched.iterrows())
+        assert len(matched) == 0
+        assert len(unmatched_sett) == 2
+
+    def test_exact_3way_match(self, matcher, sample_settlements, sample_bank, sample_ledger):
+        matched, _, _, _, _ = matcher.stage1_exact_match(
+            sample_settlements, sample_bank, sample_ledger
+        )
+        assert len(matched) == 2
+        assert all(m['match_type'] == 'exact_3way' for _, m in matched.iterrows())
         assert all(m['confidence'] == 1.0 for _, m in matched.iterrows())
     
     def test_no_match_on_different_utr(self, matcher):

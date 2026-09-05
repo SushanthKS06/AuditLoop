@@ -10,7 +10,7 @@ Covers:
 - _deterministic_recheck rejects when amount diff > 2% with no fee justification.
 - _deterministic_recheck accepts a fee-adjusted match (settlement + fee ≈ counterpart).
 - _deterministic_recheck rejects when date diff > 5 days.
-- force_disagreement_case=True produces exactly one llm_deterministic_disagreement
+- demo_disagreement_case=True produces exactly one llm_deterministic_disagreement
   with forced_demo_case=True, and that record is trivially filterable.
 """
 
@@ -152,8 +152,8 @@ class TestLLMErrorHandling:
 
     def test_explain_exception_raises_gives_parse_error_status(self):
         """
-        If explain_exception() raises RuntimeError, that record gets
-        final_status='llm_parse_error'. The rest of the batch is unaffected.
+        If explain_exception() raises RuntimeError with timeout, that record gets
+        final_status='llm_provider_failure'. The rest of the batch is unaffected.
         """
         client = MagicMock()
         client.explain_exception.side_effect = RuntimeError("network timeout")
@@ -163,7 +163,8 @@ class TestLLMErrorHandling:
         results = dispatcher.process_exceptions(exceptions, concurrent=False)
 
         assert len(results) == 1
-        assert results[0]["final_status"] == ReconciliationState.LLM_PARSE_ERROR.value
+        assert results[0]["final_status"] == ReconciliationState.LLM_PROVIDER_FAILURE.value
+
 
     def test_explain_exception_returns_invalid_gives_parse_error(self):
         """explain_exception returning valid=False → final_status='llm_parse_error'."""
@@ -231,8 +232,28 @@ class TestLLMErrorHandling:
 class TestDeterministicRecheck:
 
     def _recheck(self, sett, count):
+        from engine.context import ReconciliationContext
         dispatcher = ExceptionDispatcher(llm_client=None)
-        return dispatcher._deterministic_recheck(sett, count)
+        
+        ctx_payload = {'settlement': sett}
+        sett_net = sett.get('settled_amount', 1000.0) if sett else 1000.0
+        sett_fee = sett.get('fee', 0.0) if sett else 0.0
+        try:
+            gross = sett.get('amount') if sett and sett.get('amount') is not None else (float(sett_net) + float(sett_fee))
+        except ValueError:
+            gross = 1000.0
+        if count and 'amount' in count:
+            ctx_payload['bank'] = count
+            ctx_payload['ledger'] = {"expected_amount": gross, "order_date": sett.get('settled_at') if sett else "2026-09-01"}
+        elif count:
+            ctx_payload['ledger'] = count
+            ctx_payload['bank'] = {"amount": gross, "value_date": sett.get('settled_at') if sett else "2026-09-01"}
+
+
+            
+        ctx = ReconciliationContext.from_exception(ctx_payload)
+        passed, _ = dispatcher._verify_context(ctx)
+        return passed
 
     def test_exact_amount_match_passes(self):
         sett = {"settled_amount": 1000.0, "settled_at": "2026-09-01", "fee": 0.0}
@@ -313,21 +334,21 @@ class TestDeterministicRecheck:
 
 
 # ---------------------------------------------------------------------------
-# force_disagreement_case
+# demo_disagreement_case
 # ---------------------------------------------------------------------------
 
 class TestForceDisagreementCase:
 
     def test_forced_disagreement_produces_exactly_one_disagreement(self):
         """
-        force_disagreement_case=True must inject exactly one
+        demo_disagreement_case=True must inject exactly one
         llm_deterministic_disagreement result regardless of LLM behaviour.
         """
         client = _make_stub_llm_client(action="flag_for_human")
         dispatcher = ExceptionDispatcher(llm_client=client, max_workers=1)
         exceptions = [_make_exception(i) for i in range(5)]
         results = dispatcher.process_exceptions(
-            exceptions, force_disagreement_case=True, concurrent=False
+            exceptions, demo_disagreement_case=True, concurrent=False
         )
 
         disagreements = [
@@ -344,7 +365,7 @@ class TestForceDisagreementCase:
         dispatcher = ExceptionDispatcher(llm_client=client, max_workers=1)
         exceptions = [_make_exception(i) for i in range(4)]
         results = dispatcher.process_exceptions(
-            exceptions, force_disagreement_case=True, concurrent=False
+            exceptions, demo_disagreement_case=True, concurrent=False
         )
 
         disagreements = [
@@ -362,7 +383,7 @@ class TestForceDisagreementCase:
         dispatcher = ExceptionDispatcher(llm_client=client, max_workers=1)
         exceptions = [_make_exception(i) for i in range(6)]
         results = dispatcher.process_exceptions(
-            exceptions, force_disagreement_case=True, concurrent=False
+            exceptions, demo_disagreement_case=True, concurrent=False
         )
 
         real_results = [r for r in results if not r.get("forced_demo_case")]
@@ -383,7 +404,7 @@ class TestForceDisagreementCase:
         dispatcher = ExceptionDispatcher(llm_client=client, max_workers=1)
         exceptions = [_make_exception(i) for i in range(5)]
         results = dispatcher.process_exceptions(
-            exceptions, force_disagreement_case=False, concurrent=False
+            exceptions, demo_disagreement_case=False, concurrent=False
         )
 
         forced = [r for r in results if r.get("forced_demo_case")]

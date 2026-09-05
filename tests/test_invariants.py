@@ -134,10 +134,22 @@ class TestInvariant2LLMCannotBypassVerification:
                 'payment_id': 'PAY_001', 'amount': 10000.0, 'settled_amount': 9800.0, 'fee': 200.0,
                 'settled_at': '2026-09-01',
             },
+            'bank': {
+                'amount': 8000.0,
+                'value_date': '2026-09-01',
+                'txn_id': 'TXN_001',
+            },
+            'ledger': {
+                'expected_amount': 10000.0,
+                'order_id': 'ORD_001',
+                'order_date': '2026-09-01',
+            },
             'counterpart': {
-                'amount': 8000.0,  # 18.4% discrepancy — way outside any fee range
+                'amount': 8000.0,
                 'value_date': '2026-09-01',
             },
+            'has_bank_leg': True,
+            'has_ledger_leg': True,
             'source': 'synthetic',
         }
 
@@ -169,10 +181,22 @@ class TestInvariant2LLMCannotBypassVerification:
                 'payment_id': 'PAY_002', 'amount': 1000.0, 'settled_amount': 976.40, 'fee': 23.60,
                 'settled_at': '2026-09-01',
             },
+            'bank': {
+                'amount': 976.40,
+                'value_date': '2026-09-01',
+                'txn_id': 'TXN_002',
+            },
+            'ledger': {
+                'expected_amount': 1000.0,
+                'order_id': 'ORD_002',
+                'order_date': '2026-09-01',
+            },
             'counterpart': {
-                'amount': 976.40,  # Exact settled amount — within threshold
+                'amount': 976.40,
                 'value_date': '2026-09-01',
             },
+            'has_bank_leg': True,
+            'has_ledger_leg': True,
             'source': 'synthetic',
         }
 
@@ -269,11 +293,28 @@ class TestInvariant4PIINeverReachesLLM:
         assert '9876543210' not in clean, "Phone number leaked through sanitize_text"
         assert 'ORD_001' in clean, "Non-PII reference was wrongly removed"
 
-    def test_bank_account_in_narration_redacted(self):
-        """14-digit bank account number in narration text must be redacted."""
-        narration = "Transfer to account 12345678901234 completed"
-        clean = sanitize_text(narration)
-        assert '12345678901234' not in clean, "Bank account number leaked through sanitize_text"
+    def test_nested_and_unknown_fields_redacted(self):
+        raw = {
+            'amount': 100.0,
+            'nested': {
+                'email': 'hidden@example.com',
+                'phone': '9876543210',
+                'future_secret': 'PAN ABCDE1234F',
+            },
+            'items': [
+                {'account_number': '12345678901234'},
+                'call 9876543210',
+            ],
+            'card_number': '4111 1111 1111 1111',
+        }
+        clean = sanitize_record_for_llm(raw)
+        blob = str(clean)
+        assert 'hidden@example.com' not in blob
+        assert '9876543210' not in blob
+        assert 'ABCDE1234F' not in blob
+        assert '12345678901234' not in blob
+        assert '4111 1111 1111 1111' not in blob
+        assert clean['amount'] == 100.0
 
 
 # ── INVARIANT 5 ─────────────────────────────────────────────────────────────

@@ -35,10 +35,15 @@ def _append_n(store: AuditStore, n: int, prefix: str):
 class TestAuditStoreConcurrency:
     """Verify BEGIN IMMEDIATE + Lock prevent hash-chain forks under load."""
 
-    def test_10_concurrent_writers_chain_unbroken(self, audit_store):
-        """10 threads writing simultaneously must produce an unbroken chain."""
-        n_threads = 10
-        records_per_thread = 10
+    def test_1_writer_chain_unbroken(self, audit_store):
+        _append_n(audit_store, 25, 'S')
+        assert len(audit_store.get_all()) == 25
+        assert audit_store.verify_integrity()['integrity_verified'] is True
+
+    def test_100_concurrent_writers_chain_unbroken(self, audit_store):
+        """100 threads writing simultaneously must produce an unbroken chain."""
+        n_threads = 100
+        records_per_thread = 2
         threads = [
             threading.Thread(target=_append_n, args=(audit_store, records_per_thread, f'T{t}'))
             for t in range(n_threads)
@@ -47,13 +52,12 @@ class TestAuditStoreConcurrency:
             t.start()
         for t in threads:
             t.join()
-
-        # Total records written
         entries = audit_store.get_all()
         assert len(entries) == n_threads * records_per_thread, (
             f"Expected {n_threads * records_per_thread} records, "
             f"got {len(entries)}. Some writes were lost."
         )
+        assert audit_store.verify_integrity()['integrity_verified'] is True
 
         # Chain must be unbroken: each previous_hash == preceding record_hash
         integrity = audit_store.verify_integrity()

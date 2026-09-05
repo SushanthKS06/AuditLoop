@@ -83,7 +83,8 @@ class TestNumericAndSqlEdgeCases:
             settlements, bank, ledger
         )
         assert len(matched_df) == 1
-        assert matched_df.iloc[0]['final_status'] == 'matched'
+        assert matched_df.iloc[0]['final_status'] == 'exact_match'
+
     
     def test_extreme_and_negative_amounts(self):
         """Verify handling of negative accounting values, zeroes, and formatted strings."""

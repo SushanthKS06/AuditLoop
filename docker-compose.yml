@@ -19,7 +19,7 @@ services:
       - API_SECRET_KEY=${API_SECRET_KEY:-dev-secret-key}
       - ENV=${ENV:-development}
       - DEMO_MODE=${DEMO_MODE:-true}
-    command: python run_pipeline.py --force-disagreement --records 20
+    command: python run_pipeline.py --demo-disagreement --records 20
     profiles:
       - run
 
@@ -66,7 +66,7 @@ services:
       - PYTHONUNBUFFERED=1
     # Run pipeline first, then start dashboard and API server
     command: >
-      sh -c "python run_pipeline.py --force-disagreement --records 20 && 
+      sh -c "python run_pipeline.py --demo-disagreement --records 20 && 
              (streamlit run dashboard/app.py --server.address=0.0.0.0 --server.port=8501 &
               uvicorn api.app:app --host 0.0.0.0 --port 8000)"
     profiles:

@@ -48,15 +48,15 @@ class ReconciliationPipeline:
     It proposes but never commits - all proposals are re-verified.
     """
     
-    def __init__(self, use_llm: bool = True, force_disagreement_demo: bool = False, run_id: Optional[str] = None):
+    def __init__(self, use_llm: bool = True, demo_disagreement_demo: bool = False, run_id: Optional[str] = None):
         """
         Args:
             use_llm: Whether to invoke LLM for exceptions (default True)
-            force_disagreement_demo: Ensure at least one disagreement case exists
+            demo_disagreement_demo: Ensure at least one disagreement case exists
             run_id: Unique identifier for this pipeline execution
         """
         self.use_llm = use_llm
-        self.force_disagreement_demo = force_disagreement_demo
+        self.demo_disagreement_demo = demo_disagreement_demo
         import uuid
         self.run_id = run_id or f"run_{uuid.uuid4().hex[:8]}"
         self.batch_id = f"batch_{uuid.uuid4().hex[:8]}"
@@ -134,7 +134,7 @@ class ReconciliationPipeline:
         print("AUDITLOOP RECONCILIATION PIPELINE")
         print("="*60)
         
-        if self.force_disagreement_demo:
+        if self.demo_disagreement_demo:
             print("\n[!] WARNING: FORCED DEMO CASE ENABLED [!]")
             print("This run includes at least one fabricated discrepancy to demonstrate")
             print("the LLM-vs-Deterministic conflict resolution UI.")
@@ -227,7 +227,7 @@ class ReconciliationPipeline:
         if exceptions and self.use_llm:
             processed_exceptions = self.dispatcher.process_exceptions(
                 exceptions,
-                force_disagreement_case=self.force_disagreement_demo
+                demo_disagreement_case=self.demo_disagreement_demo
             )
             
             for exc in processed_exceptions:
@@ -319,7 +319,13 @@ class ReconciliationPipeline:
         # Step 5: Computing metrics
         print("\n[Step 5] Computing metrics...")
         metrics = self.evaluator.evaluate(
-            results=self.all_results
+            results=self.all_results,
+            input_transaction_ids=[
+                str(e) for e in settlements_df['entity_id'].tolist()
+            ] if 'entity_id' in settlements_df.columns else [
+                str(e) for e in settlements_df['payment_id'].tolist()
+            ] if 'payment_id' in settlements_df.columns else None,
+            input_transaction_count=len(settlements_df),
         )
         self.evaluator.print_summary(metrics)
         
@@ -351,12 +357,18 @@ class ReconciliationPipeline:
         """
         STATUS_SEVERITY = {
             'llm_deterministic_disagreement': 0,
+            'incomplete_counterparts': 0,
             'unresolved_exception': 1,
             'explained_no_resolution': 2,
             'low_confidence': 3,
+            'flagged_for_review': 3,
             'llm_error': 4,
+            'llm_parse_error': 4,
             'llm_unavailable': 4,
+            'llm_provider_failure': 4,
             'matched_llm_verified': 5,
+            'fuzzy_match': 6,
+            'exact_match': 6,
             'matched': 6,
         }
 
@@ -455,8 +467,6 @@ class ReconciliationPipeline:
                     winner = dict(results[best_idx])
                     winner['_merged_from_count'] = len(comp)
                     
-                    # Merge missing identifiers and metadata from other rows into the winner
-                    # so it doesn't lose its entity_id/payment_id if an orphaned bank row was picked.
                     for idx in comp:
                         r = results[idx]
                         if r.get('forced_demo_case'):
@@ -477,15 +487,17 @@ class ReconciliationPipeline:
                                     
                     deduplicated.append(winner)
             else:
-                # Component is ambiguous; emit all individually as unresolved
+                # Component is ambiguous; emit all rows as duplicate_suspect
                 for idx in comp:
-                    row_copy = dict(results[idx])
-                    row_copy['final_status'] = 'unresolved_exception'
-                    row_copy['type'] = 'ambiguous_shared_identifier'
-                    row_copy['_ambiguous_merge'] = True
-                    row_copy['source'] = row_copy.get('source', 'synthetic')
-                    row_copy['forced_demo_case'] = row_copy.get('forced_demo_case', False)
-                    deduplicated.append(row_copy)
+                    r = dict(results[idx])
+                    r['final_status'] = 'duplicate_suspect'
+                    r['type'] = 'ambiguous_shared_identifier'
+                    r['_ambiguous_merge'] = True
+                    r['_merged_from_count'] = len(comp)
+                    r['source'] = r.get('source', 'synthetic')
+                    r['forced_demo_case'] = r.get('forced_demo_case', False)
+                    deduplicated.append(r)
+
 
         return deduplicated
 
@@ -537,7 +549,7 @@ class ReconciliationPipeline:
                 num_records=num_records,
                 settlements_df=settlements_df if settlements_df is not None and len(settlements_df) == num_records else None,
                 output_dir="data",
-                force_disagreement=self.force_disagreement_demo,
+                demo_disagreement=self.demo_disagreement_demo,
                 run_id=self.run_id,
                 batch_id=self.batch_id
             )
@@ -570,10 +582,12 @@ def run_pipeline_cli():
                         help="Force at least one disagreement case for demo")
     parser.add_argument("--run-id", type=str, default=None,
                         help="Unique identifier for this pipeline run")
-    parser.add_argument("--records", type=int, default=80,
+    parser.add_argument("--records", type=int, default=20,
                         help="Number of records to generate if needed")
     parser.add_argument("--seed", type=int, default=42,
                         help="Random seed for reproducibility")
+    parser.add_argument("--messiness", type=float, default=0.25,
+                        help="Fraction of synthetic records with injected issues (0.0-1.0)")
     parser.add_argument("--settlements", type=str, default="data/settlements_live.csv",
                         help="Path to settlements CSV")
     parser.add_argument("--bank", type=str, default="data/bank_statement.csv",
@@ -582,10 +596,13 @@ def run_pipeline_cli():
                         help="Path to internal ledger CSV")
     
     args = parser.parse_args()
+    if args.messiness < 0.0 or args.messiness > 1.0:
+        print("Error: --messiness must be between 0.0 and 1.0")
+        return 1
     
     pipeline = ReconciliationPipeline(
         use_llm=not args.no_llm,
-        force_disagreement_demo=args.demo_disagreement,
+        demo_disagreement_demo=args.demo_disagreement,
         run_id=args.run_id
     )
     
@@ -595,7 +612,8 @@ def run_pipeline_cli():
         ledger_path=args.ledger,
         generate_if_missing=True,
         num_records=args.records,
-        seed=args.seed
+        seed=args.seed,
+        messiness_ratio=args.messiness
     )
     
     if 'error' in results:

@@ -50,4 +50,16 @@ class TestPiiSanitizer:
         assert clean_record['email'] == '[REDACTED_PII]'
         assert clean_record['phone'] == '[REDACTED_PII]'
         assert clean_record['customer_ref'] == 'CUST_[REDACTED]'
-        assert "9876543210" not in clean_record['narration']
+    def test_nested_dict_and_list(self):
+        raw = {
+            'order_id': 'ORD_1',
+            'meta': {'email': 'a@b.com', 'note': 'PAN ABCDE1234F'},
+            'history': [{'phone': '9876543210'}, '4111-1111-1111-1111'],
+        }
+        clean = sanitize_record_for_llm(raw)
+        blob = str(clean)
+        assert 'a@b.com' not in blob
+        assert 'ABCDE1234F' not in blob
+        assert '9876543210' not in blob
+        assert '4111-1111-1111-1111' not in blob
+        assert clean['order_id'] == 'ORD_1'

@@ -37,7 +37,7 @@ All notable changes to AuditLoop are documented in this file. The format is base
 - Test suite (all files non-empty, all tests passing):
   - `test_matcher.py` — Stage 1 exact match, Stage 2 fuzzy/fee-adjusted matching, normalization, orphan and duplicate rejection
   - `test_llm_schema_validation.py` — Pydantic schema validation for `ExplainExceptionResponse` and `ProposeResolutionResponse`: valid payloads, missing fields, wrong enum values, wrong types, confidence boundary (0/1), `ValidatedResponse` factory methods
-  - `test_exception_dispatch_reliability.py` — `ExceptionDispatcher.process_exceptions` ordering guarantee (serial + concurrent under `ThreadPoolExecutor`), LLM mid-call error → `llm_parse_error` status without batch crash, `_deterministic_recheck` boundary logic (amount threshold, fee-adjusted match, date window), `force_disagreement_case` produces exactly one filterable synthetic case
+  - `test_exception_dispatch_reliability.py` — `ExceptionDispatcher.process_exceptions` ordering guarantee (serial + concurrent under `ThreadPoolExecutor`), LLM mid-call error → `llm_parse_error` status without batch crash, `_deterministic_recheck` boundary logic (amount threshold, fee-adjusted match, date window), `demo_disagreement_case` produces exactly one filterable synthetic case
   - `test_groq_client.py` — `GroqClient` clean failure on missing `GROQ_API_KEY`, `create_client()` returns `None` gracefully, `_parse_tool_response` valid/invalid/malformed paths, `_execute_with_retry` count verification, 429 delay branch, request shape (tool_choice, temperature=0.0)
   - `test_end_to_end_metrics.py` — Full pipeline reproducibility tests
   - `test_audit_integrity.py` — SHA-256 audit chain verification

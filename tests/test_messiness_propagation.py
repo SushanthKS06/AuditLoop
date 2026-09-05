@@ -123,6 +123,8 @@ class TestMessinessPropagation:
         results = result.get('results', [])
         exceptions = [r for r in results if r.get('final_status') not in (
             ReconciliationState.EXACT_MATCH.value,
+            ReconciliationState.FUZZY_MATCH.value,
+            ReconciliationState.MATCHED.value,
             ReconciliationState.MATCHED_LLM_VERIFIED.value
         )]
         exception_rate = len(exceptions) / len(results) if results else 0

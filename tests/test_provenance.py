@@ -196,7 +196,7 @@ class TestForcedDemoCaseSurfacedInAPI:
 
     def test_forced_demo_case_field_present_in_audit_recent(self):
         """
-        After a reconcile run with force_disagreement=True,
+        After a reconcile run with demo_disagreement=True,
         /audit/recent entries that are forced demo cases must expose
         forced_demo_case=1 (truthy) in the API response.
         """
@@ -205,7 +205,7 @@ class TestForcedDemoCaseSurfacedInAPI:
             "records": 10,
             "seed": 77,
             "messiness": 0.2,
-            "force_disagreement": True,
+            "demo_disagreement": True,
             "use_llm": False,
         }
         reconcile_resp = self.client.post("/reconcile", json=payload)

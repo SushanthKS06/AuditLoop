@@ -51,7 +51,7 @@ class SyntheticDataGenerator:
         num_records: int = 80,
         settlements_df: Optional[pd.DataFrame] = None,
         output_dir: str = "data",
-        force_disagreement: bool = False,
+        demo_disagreement: bool = False,
         run_id: Optional[str] = None,
         batch_id: Optional[str] = None
     ) -> tuple:
@@ -62,7 +62,7 @@ class SyntheticDataGenerator:
             num_records: Target number of records to generate
             settlements_df: Optional DataFrame from Razorpay API (for linking)
             output_dir: Directory to write CSV files
-            force_disagreement: If True, injects an organic disagreement candidate edge case
+            demo_disagreement: If True, injects an organic disagreement candidate edge case
             
         Returns:
             Tuple of (bank_df, ledger_df, ground_truth_list)
@@ -78,7 +78,7 @@ class SyntheticDataGenerator:
         num_synthetic = num_records - num_real
         
         print(f"Generating {num_records} records:")
-        print(f"  - {num_real} linked to real Razorpay settlements")
+        print(f"  - {num_real} linked to existing settlement rows (provenance preserved per-row)")
         print(f"  - {num_synthetic} fully synthetic")
         
         settlement_records = []
@@ -94,7 +94,13 @@ class SyntheticDataGenerator:
         # Include existing real settlements
         for i, settlement in enumerate(real_settlements[:num_real]):
             settlement_copy = dict(settlement)
-            settlement_copy['source'] = 'razorpay_test'
+            settlement_copy['source'] = settlement.get('source') or 'synthetic'
+            if settlement_copy['source'] == 'razorpay_test':
+                pass
+            elif str(settlement_copy['source']).startswith('razorpay'):
+                settlement_copy['source'] = 'razorpay_test'
+            else:
+                settlement_copy['source'] = settlement.get('source') or 'synthetic'
             settlement_copy['run_id'] = run_id
             settlement_copy['batch_id'] = batch_id
             settlement_copy['ingestion_timestamp'] = ingestion_timestamp
@@ -144,7 +150,7 @@ class SyntheticDataGenerator:
             settlement_records.append(sett_rec)
             
             messiness_type = self._decide_messiness()
-            if force_disagreement and i == num_synthetic // 2:
+            if demo_disagreement and i == num_synthetic // 2:
                 messiness_type = "date_lag"
             
             bank_rec, ledger_rec, gt_entry = self._create_matched_pair(
@@ -216,7 +222,7 @@ class SyntheticDataGenerator:
             fee=fee,
             settled_at=settled_at,
             messiness_type=messiness_type,
-            source='razorpay_test',
+            source=settlement.get('source') or 'synthetic',
             run_id=run_id,
             batch_id=batch_id,
             ingestion_timestamp=ingestion_timestamp
@@ -480,7 +486,7 @@ def generate_all_datasets(
     link_to_settlements: bool = False,
     settlements_path: str = "data/settlements_live.csv",
     output_dir: str = "data",
-    force_disagreement: bool = False
+    demo_disagreement: bool = False
 ):
     """Programmatic API for generating all datasets.
     
@@ -493,7 +499,7 @@ def generate_all_datasets(
         link_to_settlements: Whether to link to real Razorpay settlements
         settlements_path: Path to settlements CSV if linking
         output_dir: Output directory for generated files
-        force_disagreement: Force at least one LLM/deterministic disagreement case
+        demo_disagreement: Force at least one LLM/deterministic disagreement case
     """
     # Load settlements if available and requested
     settlements_df = None
@@ -508,7 +514,7 @@ def generate_all_datasets(
         num_records=num_records,
         settlements_df=settlements_df,
         output_dir=output_dir,
-        force_disagreement=force_disagreement
+        demo_disagreement=demo_disagreement
     )
     
     return generator.ground_truth

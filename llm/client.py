@@ -33,6 +33,7 @@ from .schemas import (
     ProposeResolutionResponse,
     ValidatedResponse
 )
+from .privacy import sanitize_record_for_llm
 from .prompts import (
     EXPLAIN_EXCEPTION_SYSTEM,
     PROPOSE_RESOLUTION_SYSTEM,
@@ -94,7 +95,10 @@ class GroqClient:
             return {"valid": False, "error": "Client not initialized"}
         
         try:
-            user_prompt = build_explain_prompt(record_a, record_b)
+            user_prompt = build_explain_prompt(
+                sanitize_record_for_llm(record_a),
+                sanitize_record_for_llm(record_b) if record_b else None,
+            )
             
             tool_schema = {
                 "type": "function",
@@ -174,7 +178,10 @@ class GroqClient:
             return {"valid": False, "error": "Client not initialized"}
         
         try:
-            user_prompt = build_propose_prompt(record_a, record_b)
+            user_prompt = build_propose_prompt(
+                sanitize_record_for_llm(record_a),
+                sanitize_record_for_llm(record_b),
+            )
             
             tool_schema = {
                 "type": "function",

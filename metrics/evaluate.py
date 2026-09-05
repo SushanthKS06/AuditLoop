@@ -13,9 +13,12 @@ Design:
 
 import json
 import os
+import logging
 from typing import Dict, List, Any, Optional
 
 from engine.states import ReconciliationState
+
+logger = logging.getLogger(__name__)
 
 
 class MetricsEvaluator:
@@ -48,15 +51,22 @@ class MetricsEvaluator:
     def evaluate(
         self,
         results: List[Dict],
-        output_path: Optional[str] = "metrics/metrics_report.json"
+        output_path: Optional[str] = "metrics/metrics_report.json",
+        input_transaction_ids: Optional[List[str]] = None,
+        input_transaction_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Evaluate reconciliation results against ground truth.
+
+        Metrics are computed ONLY over transaction evaluation units derived
+        from the original input settlement set. Orphan bank/ledger rows and
+        duplicate-suspect events are reported separately and never inflate
+        total_input_transactions.
+
+        Demo-injected rows (forced_demo_case=True) are excluded from TP/FP/FN.
         """
-        # Always reload ground truth to reflect latest run
         self.ground_truth = self._load_ground_truth()
 
-        # Build lookup maps by payment_id, order_id, utr, and bank_txn_id
         gt_by_payment: Dict[str, Dict] = {}
         gt_by_order: Dict[str, Dict] = {}
         gt_by_utr: Dict[str, Dict] = {}
@@ -72,27 +82,45 @@ class MetricsEvaluator:
             if gt.get('bank_txn_id'):
                 gt_by_bank_txn[str(gt['bank_txn_id']).lower()] = gt
 
-        # Classification buckets
         transaction_results = []
         orphan_bank_records = 0
         orphan_ledger_records = 0
         duplicate_suspects = 0
+        demo_injected_count = 0
 
         for res in results:
             t = res.get('type')
             status = res.get('final_status')
-            
-            if t == ReconciliationState.UNMATCHED_BANK.value or t == 'unmatched_bank':
-                orphan_bank_records += 1
-            elif t == ReconciliationState.UNMATCHED_LEDGER.value or t == 'unmatched_ledger':
-                orphan_ledger_records += 1
-            else:
-                transaction_results.append(res)
-                
-            if status == ReconciliationState.REJECTED_DUPLICATE.value:
-                duplicate_suspects += 1
+            if res.get('forced_demo_case'):
+                demo_injected_count += 1
 
-        # Classify transaction results
+            if ReconciliationState.is_orphan_event(str(t or '')):
+                if t == ReconciliationState.UNMATCHED_BANK.value or t == 'unmatched_bank':
+                    orphan_bank_records += 1
+                else:
+                    orphan_ledger_records += 1
+                continue
+
+            if status in (
+                ReconciliationState.REJECTED_DUPLICATE.value,
+                ReconciliationState.DUPLICATE_SUSPECT.value,
+            ):
+                duplicate_suspects += 1
+                continue
+
+            transaction_results.append(res)
+
+        if input_transaction_ids is not None:
+            total_input_transactions = len(input_transaction_ids)
+        elif input_transaction_count is not None:
+            total_input_transactions = int(input_transaction_count)
+        else:
+            total_input_transactions = len(transaction_results)
+
+        organic_transactions = [
+            r for r in transaction_results if not r.get('forced_demo_case')
+        ]
+
         true_positives = 0
         false_positives = 0
         true_negatives = 0
@@ -103,11 +131,20 @@ class MetricsEvaluator:
         disagreement_count = 0
         unresolved_count = 0
         unverified_count = 0
-        
+        review_count = 0
+        rejected_count = 0
+
         used_gt_ids = set()
         duplicate_ground_truth_assignments = 0
+        impossible_state = None
 
-        for result in transaction_results:
+        if len(organic_transactions) > total_input_transactions:
+            impossible_state = (
+                f"transaction_results ({len(organic_transactions)}) exceed "
+                f"input_transactions ({total_input_transactions})"
+            )
+
+        for result in organic_transactions:
             final_status = result.get('final_status', '')
             is_matched = ReconciliationState.is_match(final_status)
 
@@ -116,7 +153,6 @@ class MetricsEvaluator:
             )
 
             if gt:
-                # Verified record
                 gt_id = id(gt)
                 if gt_id in used_gt_ids:
                     duplicate_ground_truth_assignments += 1
@@ -147,17 +183,27 @@ class MetricsEvaluator:
             if final_status == ReconciliationState.LLM_DETERMINISTIC_DISAGREEMENT.value:
                 disagreement_count += 1
 
+            if ReconciliationState.is_review(final_status):
+                review_count += 1
+
+            if ReconciliationState.is_rejected(final_status):
+                rejected_count += 1
+
             if final_status in [
                 ReconciliationState.UNRESOLVED_EXCEPTION.value,
                 ReconciliationState.LLM_ERROR.value,
+                ReconciliationState.LLM_PARSE_ERROR.value,
                 ReconciliationState.LOW_CONFIDENCE.value,
                 ReconciliationState.LLM_UNAVAILABLE.value,
-                ReconciliationState.EXPLAINED_NO_RESOLUTION.value
+                ReconciliationState.LLM_PROVIDER_FAILURE.value,
+                ReconciliationState.EXPLAINED_NO_RESOLUTION.value,
+                ReconciliationState.INCOMPLETE_COUNTERPARTS.value,
             ]:
                 unresolved_count += 1
 
-        total_input_transactions = len(transaction_results)
         evaluated_transactions = total_input_transactions - unverified_count
+        if evaluated_transactions < 0:
+            evaluated_transactions = max(0, len(organic_transactions) - unverified_count)
 
         precision = (
             true_positives / (true_positives + false_positives)
@@ -171,7 +217,8 @@ class MetricsEvaluator:
             else 0.0
         )
 
-        match_rate = matched_count / total_input_transactions if total_input_transactions > 0 else 0.0
+        denom_match_rate = total_input_transactions if total_input_transactions > 0 else 1
+        match_rate = matched_count / denom_match_rate if total_input_transactions > 0 else 0.0
 
         false_positive_rate = (
             false_positives / (false_positives + true_negatives)
@@ -184,49 +231,71 @@ class MetricsEvaluator:
             if (precision + recall) > 0
             else 0.0
         )
-        
-        # Denominator safety assertions
+
+        coverage_denom = total_input_transactions if total_input_transactions > 0 else 1
+        ground_truth_coverage = round(
+            (total_input_transactions - unverified_count) / coverage_denom, 4
+        ) if total_input_transactions > 0 else 0.0
+        if ground_truth_coverage < 0:
+            ground_truth_coverage = 0.0
+        if ground_truth_coverage > 1:
+            ground_truth_coverage = 1.0
+
         assert precision <= 1.0, "Precision cannot exceed 1.0"
         assert recall <= 1.0, "Recall cannot exceed 1.0"
-        assert evaluated_transactions <= total_input_transactions, "Evaluated transactions cannot exceed input transactions"
-
-        ground_truth_coverage = (
-            round(evaluated_transactions / total_input_transactions, 4)
-            if total_input_transactions > 0 else 0.0
-        )
 
         metrics: Dict[str, Any] = {
             'total_input_transactions': total_input_transactions,
-            'evaluated_transactions': evaluated_transactions,
+            'evaluated_transactions': min(
+                total_input_transactions,
+                total_input_transactions - unverified_count if unverified_count <= total_input_transactions else len(organic_transactions) - unverified_count
+            ),
+            'transaction_result_rows': len(transaction_results),
             'ground_truth_records': len(self.ground_truth),
-            
+            'evaluation_unit': 'input_settlement',
+
             'matched_count': matched_count,
             'exception_count': exception_count,
             'disagreement_count': disagreement_count,
             'unresolved_count': unresolved_count,
-            
+            'review_count': review_count,
+            'rejected_count': rejected_count,
+
             'orphan_bank_records': orphan_bank_records,
             'orphan_ledger_records': orphan_ledger_records,
             'duplicate_suspects': duplicate_suspects,
-            
+            'demo_injected_count': demo_injected_count,
+            'benchmark_mode': demo_injected_count == 0,
+            'demo_mode': demo_injected_count > 0,
+
             'ground_truth_coverage': ground_truth_coverage,
             'unverified_count': unverified_count,
             'duplicate_ground_truth_assignments': duplicate_ground_truth_assignments,
-            
+            'impossible_state': impossible_state,
+
             'match_rate': round(match_rate, 4),
             'precision': round(precision, 4),
             'recall': round(recall, 4),
             'false_positive_rate': round(false_positive_rate, 4),
             'f1_score': round(f1, 4),
-            
+
             'true_positives': true_positives,
             'false_positives': false_positives,
             'true_negatives': true_negatives,
             'false_negatives': false_negatives,
+            'coverage': ground_truth_coverage,
         }
 
-        llm_cost_savings = self.compute_llm_cost_savings(transaction_results, metrics)
+        scored = total_input_transactions - unverified_count
+        metrics['evaluated_transactions'] = max(0, scored) if total_input_transactions else 0
+        # When input count was inferred from result rows, unverified is among those rows.
+        if input_transaction_ids is None and input_transaction_count is None:
+            metrics['evaluated_transactions'] = total_input_transactions - unverified_count
+            metrics['evaluated_transactions'] = max(0, metrics['evaluated_transactions'])
+
+        llm_cost_savings = self.compute_llm_cost_savings(organic_transactions, metrics)
         metrics.update(llm_cost_savings)
+
 
         if output_path:
             os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
@@ -236,8 +305,8 @@ class MetricsEvaluator:
             try:
                 with open("metrics_report.json", 'w') as f:
                     json.dump(metrics, f, indent=2)
-            except Exception:
-                pass
+            except OSError as e:
+                logger.warning("Could not write metrics_report.json: %s", e)
 
             metrics_env = os.getenv("METRICS_PATH")
             if metrics_env and metrics_env not in (output_path, "metrics_report.json"):
@@ -245,8 +314,8 @@ class MetricsEvaluator:
                     os.makedirs(os.path.dirname(metrics_env) or '.', exist_ok=True)
                     with open(metrics_env, 'w') as f:
                         json.dump(metrics, f, indent=2)
-                except Exception:
-                    pass
+                except OSError as e:
+                    logger.warning("Could not write METRICS_PATH %s: %s", metrics_env, e)
 
         return metrics
 
@@ -396,9 +465,14 @@ class MetricsEvaluator:
         print("-"*60)
         print(f"Disagreements:            {metrics['disagreement_count']}")
         print(f"Unresolved Transactions:  {metrics['unresolved_count']}")
+        print(f"Review count:             {metrics.get('review_count', 0)}")
+        print(f"Rejected count:           {metrics.get('rejected_count', 0)}")
         print(f"Orphan Bank Records:      {metrics['orphan_bank_records']}")
         print(f"Orphan Ledger Records:    {metrics['orphan_ledger_records']}")
         print(f"Duplicate Suspects:       {metrics['duplicate_suspects']}")
+        print(f"Demo-injected events:     {metrics.get('demo_injected_count', 0)}")
+        if metrics.get('impossible_state'):
+            print(f"FLAG: {metrics['impossible_state']}")
         print("="*60 + "\n")
 
 

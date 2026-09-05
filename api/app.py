@@ -1,5 +1,5 @@
 """
-FastAPI service exposing AuditLoop reconciliation as a production-ready REST API.
+FastAPI service exposing AuditLoop reconciliation as a prototype REST API.
 
 Provides endpoints for programmatic reconciliation runs, metrics evaluation,
 and real-time inspection of the append-only audit trail.
@@ -105,7 +105,7 @@ class ReconcileRequest(BaseModel):
                 "records": 50,
                 "seed": 42,
                 "messiness": 0.25,
-                "force_disagreement": True,
+                "demo_disagreement": True,
                 "use_llm": True
             }
         }
@@ -113,7 +113,8 @@ class ReconcileRequest(BaseModel):
     records: int = Field(50, ge=1, le=1000, description="Number of records in the reconciliation batch")
     seed: int = Field(42, description="Random seed for deterministic reproducibility")
     messiness: float = Field(0.25, ge=0.0, le=1.0, description="Injected anomaly/messiness ratio")
-    force_disagreement: bool = Field(False, description="Ensure at least one disagreement case exists for failure-recovery validation")
+    demo_disagreement: bool = Field(False, description="Inject one demo LLM-vs-deterministic disagreement (excluded from organic metrics)")
+    demo_disagreement: bool = Field(False, description="Deprecated alias for demo_disagreement")
     use_llm: bool = Field(True, description="Enable LLM for Stage 3 exception explanation and resolution proposals")
     settlements_path: str = Field("data/settlements_live.csv", description="Path to Razorpay settlements CSV")
     bank_path: str = Field("data/bank_statement.csv", description="Path to bank statement CSV")
@@ -139,7 +140,7 @@ class HealthResponse(BaseModel):
     timestamp: str
     deterministic_engine: str = "active"
     audit_store: str = "sqlite_wal"
-    llm_status: str = "connected"
+    llm_status: str = "not_configured"
 
 
 @app.get("/health", response_model=HealthResponse, dependencies=[Depends(get_api_key)])
@@ -152,12 +153,19 @@ async def health_check():
     with llm_status indicating LLM connectivity/configuration status.
     """
     llm_key = os.getenv("GROQ_API_KEY")
-    # Claim only what we can prove without a live network call:
-    # 'configured'     - an API key is present in the environment.
-    # 'not_configured' - no key found; LLM calls will be skipped.
-    # We deliberately do NOT claim 'connected' without an actual connectivity
-    # probe, as that would be a misleading health indicator.
-    llm_status = "configured" if llm_key and len(llm_key.strip()) > 5 else "not_configured"
+    groq_available = True
+    try:
+        import groq as _groq  # noqa: F401
+    except ImportError:
+        groq_available = False
+
+    if not llm_key or len(llm_key.strip()) <= 5:
+        llm_status = "not_configured"
+    elif not groq_available:
+        llm_status = "degraded"
+    else:
+        # Key present; no live provider ping (health must stay cheap).
+        llm_status = "configured"
 
     return HealthResponse(
         status="healthy",
@@ -188,7 +196,7 @@ def run_reconciliation(request: ReconcileRequest):
     try:
         pipeline = ReconciliationPipeline(
             use_llm=request.use_llm,
-            force_disagreement_demo=request.force_disagreement
+            demo_disagreement_demo=bool(request.demo_disagreement or request.demo_disagreement)
         )
         
         results = pipeline.run(
@@ -221,13 +229,20 @@ def run_reconciliation(request: ReconcileRequest):
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
+        raise HTTPException(
+            status_code=400,
+            detail={"error_type": "bad_input", "message": str(e)}
+        )
+    except OSError as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Reconciliation execution failed: {str(e)}"
+            detail={"error_type": "audit_failure", "message": "Persistence error"}
+        )
+    except Exception as e:
+        logger.exception("Reconciliation execution failed")
+        raise HTTPException(
+            status_code=500,
+            detail={"error_type": "internal_server_failure", "message": "Reconciliation execution failed"}
         )
 
 
