@@ -1,19 +1,19 @@
 ```mermaid
 flowchart TD
     %% Define Nodes
-    DL["**Data Layer (reproducible synthetic benchmark)**<br/>- settlements.csv (synthetic)<br/>- bank_statement.csv (synthetic)<br/>- internal_ledger.csv (synthetic)<br/>- optional Razorpay test-mode ingestion"]
+    DL["Data Layer (reproducible synthetic benchmark)<br/>- settlements.csv (synthetic)<br/>- bank_statement.csv (synthetic)<br/>- internal_ledger.csv (synthetic)<br/>- optional Razorpay test-mode ingestion"]
 
-    S1["**Stage 1: Exact Match**<br/>- Hash join on UTR/order_id/payment_id<br/>- Confidence: 1.0<br/>- Audit: YES"]
+    S1["Stage 1: Exact Match<br/>- Hash join on UTR/order_id/payment_id<br/>- Confidence: 1.0<br/>- Audit: YES"]
 
-    S2["**Stage 2: Fuzzy Match**<br/>- Amount delta %, date window, text similarity<br/>- Confidence threshold: 0.85<br/>- Audit: YES"]
+    S2["Stage 2: Fuzzy Match<br/>- Amount delta %, date window, text similarity<br/>- Confidence threshold: 0.85<br/>- Audit: YES"]
 
-    S3["**Stage 3: LLM Exceptions**<br/>- explain_exception()<br/>- propose_resolution()<br/>- Pydantic validation"]
+    S3["Stage 3: LLM Exceptions<br/>- explain_exception()<br/>- propose_resolution()<br/>- Pydantic validation"]
 
-    DRC["**Deterministic Re-Check**<br/>- LLM 'match' proposals verified<br/>- Disagreement = flag for human<br/>- Fail CLOSED, never open"]
+    DRC["Deterministic Re-Check<br/>- LLM 'match' proposals verified<br/>- Disagreement = flag for human<br/>- Fail CLOSED, never open"]
 
-    AT["**Audit Trail (SQLite)**<br/>- Append-only log<br/>- Every decision recorded<br/>- Explainability & compliance"]
+    AT["Audit Trail (SQLite)<br/>- Append-only log<br/>- Every decision recorded<br/>- Explainability & compliance"]
 
-    MH["**Metrics Harness**<br/>- Precision/Recall/F1<br/>- vs ground_truth.json<br/>- Reproducible"]
+    MH["Metrics Harness<br/>- Precision/Recall/F1<br/>- vs ground_truth.json<br/>- Reproducible"]
 
     %% Define Flow / Arrows
     DL --> S1
