@@ -241,9 +241,11 @@ Numbers below are **illustrative of a past local run**, not hardcoded product cl
 
 ## Regenerating Metrics
 
-`metrics_report.json`, `metrics/metrics_report.json`, and `results.json` are
-**always written by the pipeline** — never hand-edited. To reproduce the exact
-numbers from scratch (same seed → same output):
+`metrics_report.json`, `metrics/metrics_report.json`, and
+`runtime/runs/<run-id>/results.json` are
+**always written by the pipeline** — never hand-edited. Per-run results live
+under `runtime/runs/<run-id>/`; bundled `data/` fixtures are never overwritten.
+To reproduce the exact numbers from scratch (same seed → same output):
 
 ```bash
 # Step 1: Rebuild ground truth and synthetic data (same seed as pipeline)
@@ -258,8 +260,9 @@ python run_pipeline.py --seed 42 --records 20
 # Step 3: Inspect metrics  (also written to metrics/metrics_report.json)
 cat metrics_report.json
 
-# Step 4: Optionally re-evaluate standalone (strict mode is the default)
-python -m metrics.evaluate --results results.json
+# Step 4: Optionally re-evaluate standalone (strict mode is the default;
+# the evaluator consumes the structured PipelineResult natively)
+python -m metrics.evaluate --results runtime/runs/<run-id>/results.json
 ```
 
 After a fresh run, `ground_truth_coverage` should be **1.0** because
@@ -321,8 +324,9 @@ Every row in `data/settlements_live.csv`, `data/bank_statement.csv`, and
 # Count rows by source in the settlements file
 python -c "import pandas as pd; print(pd.read_csv('data/settlements_live.csv')['source'].value_counts())"
 
-# Same for results.json
-python -c "import json; d=json.load(open('results.json')); print({r.get('source','missing') for r in d})"
+# Same for the latest per-run results.json (structured PipelineResult:
+# transaction_results + orphan/duplicate/exception event streams)
+python -c "import json, glob, os; p=sorted(glob.glob('runtime/runs/*/results.json'), key=os.path.getmtime)[-1]; d=json.load(open(p)); print(p); print({r.get('source','missing') for r in d['transaction_results']})"
 
 # Same in the SQLite audit trail
 python -c "

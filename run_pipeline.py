@@ -105,9 +105,9 @@ class ReconciliationPipeline:
 
     def run(
         self,
-        settlements_path: str = "data/settlements_live.csv",
-        bank_path: str = "data/bank_statement.csv",
-        ledger_path: str = "data/internal_ledger.csv",
+        settlements_path: str = "data/fixtures/settlements_live.csv",
+        bank_path: str = "data/fixtures/bank_statement.csv",
+        ledger_path: str = "data/fixtures/internal_ledger.csv",
         generate_if_missing: bool = True,
         num_records: int = 80,
         seed: int = 42,
@@ -271,27 +271,26 @@ class ReconciliationPipeline:
             self.all_results.append(match)
         
         # Step 4.5: Transaction-level deduplication
-        # A single real-world transaction can produce multiple rows if different
-        # pipeline legs (settlement, bank, ledger) processed it independently.
-        # Collapse all rows that share a payment_id / order_id / utr / bank_txn_id
-        # into exactly one row per transaction.  Exception status always wins over
-        # 'matched' — a transaction is only matched when every leg agrees.
-        print("\n[Step 4.5] Deduplicating cross-source results...")
+        # A single real-world transaction must produce EXACTLY ONE transaction evaluation unit.
+        # Bank/ledger orphans and duplicate suspects must be separated into their own event streams.
+        print("\n[Step 4.5] Grouping and deduplicating canonical transactions...")
         pre_dedup_count = len(self.all_results)
         
-        self.all_results = self._deduplicate_results(self.all_results)
-        dedup_removed = pre_dedup_count - len(self.all_results)
-        if dedup_removed > 0:
-            print(f"  Removed {dedup_removed} duplicate cross-source row(s) — "
-                  f"{len(self.all_results)} unique transactions remain.")
-        else:
-            print(f"  No duplicates found — {len(self.all_results)} unique transactions.")
+        grouped_results = self._deduplicate_results(self.all_results)
+        
+        transaction_results = grouped_results['transaction_results']
+        orphan_events = grouped_results['orphan_events']
+        duplicate_events = grouped_results['duplicate_events']
+        
+        print(f"  Transaction Results: {len(transaction_results)}")
+        print(f"  Orphan Events: {len(orphan_events)}")
+        print(f"  Duplicate Events: {len(duplicate_events)}")
 
         # POST-DEDUP SANITY CHECK
         # Ensure no valid input settlement entity_ids were silently dropped
         if settlements_df is not None and not settlements_df.empty:
             output_entities = set()
-            for r in self.all_results:
+            for r in transaction_results:
                 for k in ['entity_id', 'settlement_id']:
                     if r.get(k): output_entities.add(str(r.get(k)).strip().lower())
                 for nest in ['settlement', 'counterpart', 'bank', 'ledger']:
@@ -312,14 +311,20 @@ class ReconciliationPipeline:
         results_dir = os.path.join("runtime", "runs", self.run_id)
         os.makedirs(results_dir, exist_ok=True)
         results_path = os.path.join(results_dir, "results.json")
+        output_payload = {
+            'transaction_results': transaction_results,
+            'orphan_events': orphan_events,
+            'duplicate_events': duplicate_events,
+            'exception_events': []
+        }
         with open(results_path, 'w') as f:
-            json.dump(self.all_results, f, indent=2, default=str)
+            json.dump(output_payload, f, indent=2, default=str)
         print(f"  Results saved to {results_path}")
         
         # Step 5: Computing metrics
         print("\n[Step 5] Computing metrics...")
         metrics = self.evaluator.evaluate(
-            results=self.all_results,
+            results=output_payload,
             input_transaction_ids=[
                 str(e) for e in settlements_df['entity_id'].tolist()
             ] if 'entity_id' in settlements_df.columns else [
@@ -333,27 +338,40 @@ class ReconciliationPipeline:
         audit_summary = self.audit_store.get_summary_stats()
         
         return {
-            'results': self.all_results,
+            'results': output_payload,
             'metrics': metrics,
             'audit_summary': audit_summary,
             'matches_count': len(self.all_matches),
             'exceptions_count': len(exceptions)
         }
     
-    def _deduplicate_results(self, results: list) -> list:
+    def _deduplicate_results(self, results: list) -> dict:
         """
-        Collapse cross-source result rows so each real-world transaction
-        appears exactly once in the output.
+        Group and classify results by canonical transaction identity.
 
-        Algorithm
-        ---------
-        1. Extract every usable identifier from each row into an id_dict.
-        2. Build a graph: edges connect rows that share at least one identifier value.
-        3. Find connected components.
-        4. If a component has ANY conflicting identifiers between any of its members,
-           it represents distinct transactions incorrectly tied together (e.g., duplicate UTRs).
-           Do NOT collapse them; emit them individually as 'unresolved_exception'.
-        5. If a component is conflict-free, collapse it into one representative row.
+        Canonical identity model (deterministic, explainable):
+        ------------------------------------------------------
+        * STRONG identifiers decide transaction identity: the input
+          settlement's ``entity_id`` (else ``settlement_id``). One input
+          settlement row = exactly one transaction evaluation unit.
+        * ``payment_id`` / ``order_id`` are WEAK identifiers: shared values
+          across distinct settlements never merge two transaction units;
+          they are evidence, not identity. A weak-ID collision across two
+          different ``entity_id`` values yields two separate transaction
+          results (plus a duplicate-suspect/orphan event where applicable).
+        * Bank/ledger legs (``txn_id``, ``utr``, ledger ``order_id``) are
+          EVIDENCE identifiers: they attach to a transaction unit but never
+          create one. Evidence without a settlement becomes an orphan event.
+        * Exception occurrences (duplicate/orphan/conflict rows) are EVENT
+          identifiers: they are routed to ``duplicate_events`` /
+          ``orphan_events`` / ``exception_events`` and never emitted as
+          additional transaction-level rows.
+
+        Every transaction result is stamped with ``canonical_transaction_id``
+        and ``evaluation_unit_id`` (identical values; the former names the
+        financial concept, the latter the evaluation concept). Merges record
+        ``_merged_from`` evidence (the statuses that were collapsed) so the
+        decision stays auditable.
         """
         STATUS_SEVERITY = {
             'llm_deterministic_disagreement': 0,
@@ -375,131 +393,108 @@ class ReconciliationPipeline:
         def _severity(status: str) -> int:
             return STATUS_SEVERITY.get(status, 3)
 
-        def _extract_id_dict(row: dict) -> dict:
-            ids = {}
-            direct_keys = [
-                'payment_id', 'order_id',
-                'txn_id', 'bank_txn_id', 'entity_id', 'settlement_id'
-            ]
-            for k in direct_keys:
-                v = row.get(k)
-                if v and str(v).strip() and str(v).lower() not in ('none', 'nan'):
-                    key_group = 'utr' if k in ('utr', 'settlement_utr') else (
-                        'txn_id' if k in ('txn_id', 'bank_txn_id') else k
-                    )
-                    ids.setdefault(key_group, set()).add(str(v).lower().strip())
-                    
-            for nest_key in ('settlement', 'counterpart', 'bank', 'ledger'):
-                nested = row.get(nest_key)
-                if isinstance(nested, dict):
-                    for k in direct_keys:
-                        v = nested.get(k)
-                        if v and str(v).strip() and str(v).lower() not in ('none', 'nan'):
-                            key_group = 'utr' if k in ('utr', 'settlement_utr') else (
-                                'txn_id' if k in ('txn_id', 'bank_txn_id') else k
-                            )
-                            ids.setdefault(key_group, set()).add(str(v).lower().strip())
-            return ids
+        def _get_settlement_id(row: dict) -> Optional[str]:
+            # STRONG identity first: entity_id / settlement_id of the input
+            # settlement row. payment_id / order_id are only fallbacks for
+            # rows that genuinely lack a strong identifier (e.g. legacy
+            # exception payloads), never a reason to merge two distinct
+            # strong identities.
+            sett = row.get('settlement')
+            if isinstance(sett, dict):
+                strong = sett.get('entity_id') or sett.get('settlement_id')
+                if strong and str(strong).strip():
+                    return str(strong).strip().lower()
+                weak = sett.get('payment_id') or sett.get('order_id')
+                return str(weak).strip().lower() or None
+            strong = row.get('entity_id') or row.get('settlement_id')
+            if strong and str(strong).strip():
+                return str(strong).strip().lower()
+            # Top-level payment rows (matcher output) carry the settlement
+            # fields flattened; payment_id fallback preserves them.
+            weak = row.get('payment_id') or row.get('order_id')
+            return str(weak).strip().lower() or None
 
-        def _has_conflict(ids1: dict, ids2: dict) -> bool:
-            for k in ids1:
-                if k in ids2:
-                    if not ids1[k].intersection(ids2[k]):
-                        return True
-            return False
-
-        def _share_identifier(ids1: dict, ids2: dict) -> bool:
-            for k in ids1:
-                if k in ids2:
-                    if ids1[k].intersection(ids2[k]):
-                        return True
-            return False
-
-        if not results:
-            return results
-
-        n = len(results)
-        id_dicts = [_extract_id_dict(r) for r in results]
+        transaction_results = []
+        orphan_events = []
+        duplicate_events = []
         
-        from collections import defaultdict
-        adj = defaultdict(list)
-        for i in range(n):
-            for j in range(i+1, n):
-                if _share_identifier(id_dicts[i], id_dicts[j]):
-                    adj[i].append(j)
-                    adj[j].append(i)
+        # Group by canonical settlement ID
+        canonical_map = {}
+        
+        # Sort results deterministically by ID and then stringification to ensure stable processing
+        # Since these are dicts, we sort by stringified representation to avoid unorderable dict errors
+        sorted_results = sorted(results, key=lambda x: str(x))
 
-        visited = set()
-        groups = []
-        for i in range(n):
-            if i not in visited:
-                comp = []
-                q = [i]
-                visited.add(i)
-                while q:
-                    curr = q.pop(0)
-                    comp.append(curr)
-                    for neighbor in adj[curr]:
-                        if neighbor not in visited:
-                            visited.add(neighbor)
-                            q.append(neighbor)
-                groups.append(comp)
-
-        deduplicated = []
-        for comp in groups:
-            has_conflict = False
-            for i in range(len(comp)):
-                for j in range(i+1, len(comp)):
-                    if _has_conflict(id_dicts[comp[i]], id_dicts[comp[j]]):
-                        has_conflict = True
-                        break
-                if has_conflict:
-                    break
+        for r in sorted_results:
+            final_status = r.get('final_status', '')
+            t = r.get('type') or ''
             
-            if not has_conflict:
-                if len(comp) == 1:
-                    deduplicated.append(results[comp[0]])
-                else:
-                    best_idx = min(
-                        comp,
-                        key=lambda i: _severity(results[i].get('final_status', ''))
-                    )
-                    winner = dict(results[best_idx])
-                    winner['_merged_from_count'] = len(comp)
-                    
-                    for idx in comp:
-                        r = results[idx]
-                        if r.get('forced_demo_case'):
-                            winner['forced_demo_case'] = True
-                        if not winner.get('source') and r.get('source'):
-                            winner['source'] = r.get('source')
-                        for key in ['entity_id', 'settlement_id', 'payment_id', 'order_id']:
-                            if not winner.get(key) and r.get(key):
-                                winner[key] = r.get(key)
-                        if isinstance(r.get('settlement'), dict):
-                            for key in ['entity_id', 'settlement_id', 'payment_id', 'order_id']:
-                                if not winner.get(key) and r['settlement'].get(key):
-                                    winner[key] = r['settlement'].get(key)
-                    if not winner.get('source'):
-                        winner['source'] = 'synthetic'
-                    if 'forced_demo_case' not in winner:
-                        winner['forced_demo_case'] = False
-                                    
-                    deduplicated.append(winner)
+            # Explicit duplicates
+            if final_status in ('duplicate_suspect', 'rejected_duplicate'):
+                duplicate_events.append(r)
+                continue
+                
+            # Explicit orphans
+            if ReconciliationState.is_orphan_event(t) or t in ('unmatched_bank', 'unmatched_ledger'):
+                orphan_events.append(r)
+                continue
+
+            sett_id = _get_settlement_id(r)
+            if not sett_id:
+                # If there's truly no settlement ID, and it's not marked as an orphan, 
+                # we still consider it an orphan/exception event
+                orphan_events.append(r)
+                continue
+            
+            if sett_id not in canonical_map:
+                canonical_map[sett_id] = []
+            canonical_map[sett_id].append(r)
+            
+        for sett_id, group in canonical_map.items():
+            if len(group) == 1:
+                row = dict(group[0])
+                row['canonical_transaction_id'] = sett_id
+                row['evaluation_unit_id'] = sett_id
+                transaction_results.append(row)
             else:
-                # Component is ambiguous; emit all rows as duplicate_suspect
-                for idx in comp:
-                    r = dict(results[idx])
-                    r['final_status'] = 'duplicate_suspect'
-                    r['type'] = 'ambiguous_shared_identifier'
-                    r['_ambiguous_merge'] = True
-                    r['_merged_from_count'] = len(comp)
-                    r['source'] = r.get('source', 'synthetic')
-                    r['forced_demo_case'] = r.get('forced_demo_case', False)
-                    deduplicated.append(r)
+                # We have multiple result rows for the exact same input settlement!
+                # This could happen if the pipeline spawned multiple exceptions for the same settlement,
+                # e.g., one from exact matcher, one from fuzzy matcher, or duplicate rows in input.
 
+                # Check if it's a conflict (disagreements/exceptions win over matched)
+                best_idx = min(range(len(group)), key=lambda i: _severity(group[i].get('final_status', '')))
+                winner = dict(group[best_idx])
+                winner['_merged_from_count'] = len(group)
+                # Preserve the evidence that caused the merge: every
+                # collapsed row's status/type, so the decision is auditable
+                # and a reviewer can see why one leg won over another.
+                winner['_merged_from'] = [
+                    {
+                        'final_status': r.get('final_status'),
+                        'type': r.get('type'),
+                        'match_type': r.get('match_type'),
+                        'confidence': r.get('confidence'),
+                    }
+                    for r in group
+                ]
 
-        return deduplicated
+                # Aggregate info
+                for r in group:
+                    if r.get('forced_demo_case'):
+                        winner['forced_demo_case'] = True
+
+                # If we have multiple different 'unresolved_exception' types for the same settlement,
+                # we just keep the highest severity one as the transaction result.
+                # However, if one was matched and another was unresolved, the unresolved one wins.
+                winner['canonical_transaction_id'] = sett_id
+                winner['evaluation_unit_id'] = sett_id
+                transaction_results.append(winner)
+
+        return {
+            'transaction_results': transaction_results,
+            'orphan_events': orphan_events,
+            'duplicate_events': duplicate_events
+        }
 
     def _load_or_generate_data(
         self,
@@ -524,7 +519,15 @@ class ReconciliationPipeline:
                 client = RazorpayReconClient()
                 settlements_df = client.fetch_recon(year=2026, month=9, day=1)
                 if len(settlements_df) > 0:
-                    settlements_df.to_csv(settlements_path, index=False)
+                    # Never overwrite the caller's input path (fixtures are
+                    # immutable). Persist fetched settlements to this run's
+                    # runtime directory instead.
+                    _runtime_dir = os.path.join("runtime", "runs", self.run_id)
+                    os.makedirs(_runtime_dir, exist_ok=True)
+                    settlements_df.to_csv(
+                        os.path.join(_runtime_dir, "settlements_fetched.csv"),
+                        index=False,
+                    )
                     print(f"  Fetched {len(settlements_df)} settlements from Razorpay API")
                 else:
                     print("  API returned no settlements - will use synthetic data")
@@ -545,20 +548,25 @@ class ReconciliationPipeline:
         
         if needs_generation:
             generator = SyntheticDataGenerator(seed=seed, messiness_ratio=messiness_ratio)
+            
+            output_dir = os.path.join("runtime", "runs", self.run_id)
+            os.makedirs(output_dir, exist_ok=True)
+            
             bank_df, ledger_df, _ = generator.generate(
                 num_records=num_records,
                 settlements_df=settlements_df if settlements_df is not None and len(settlements_df) == num_records else None,
-                output_dir="data",
+                output_dir=output_dir,
                 demo_disagreement=self.demo_disagreement_demo,
                 run_id=self.run_id,
                 batch_id=self.batch_id
             )
-            if os.path.exists(settlements_path):
-                settlements_df = pd.read_csv(settlements_path)
+            generated_settlements_path = os.path.join(output_dir, "settlements_live.csv")
+            if os.path.exists(generated_settlements_path):
+                settlements_df = pd.read_csv(generated_settlements_path)
+                
             # Reload evaluator's ground truth from the freshly-written file so
-            # that strict-mode coverage reflects the current batch (not a stale
-            # 20-record file from a previous run).
-            gt_path = os.path.join("data", "ground_truth.json")
+            # that strict-mode coverage reflects the current batch.
+            gt_path = os.path.join(output_dir, "ground_truth.json")
             if os.path.exists(gt_path):
                 self.evaluator.ground_truth_path = gt_path
                 self.evaluator.ground_truth = self.evaluator._load_ground_truth()
@@ -588,11 +596,11 @@ def run_pipeline_cli():
                         help="Random seed for reproducibility")
     parser.add_argument("--messiness", type=float, default=0.25,
                         help="Fraction of synthetic records with injected issues (0.0-1.0)")
-    parser.add_argument("--settlements", type=str, default="data/settlements_live.csv",
+    parser.add_argument("--settlements", type=str, default="data/fixtures/settlements_live.csv",
                         help="Path to settlements CSV")
-    parser.add_argument("--bank", type=str, default="data/bank_statement.csv",
+    parser.add_argument("--bank", type=str, default="data/fixtures/bank_statement.csv",
                         help="Path to bank statement CSV")
-    parser.add_argument("--ledger", type=str, default="data/internal_ledger.csv",
+    parser.add_argument("--ledger", type=str, default="data/fixtures/internal_ledger.csv",
                         help="Path to internal ledger CSV")
     
     args = parser.parse_args()

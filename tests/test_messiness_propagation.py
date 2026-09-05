@@ -120,7 +120,8 @@ class TestMessinessPropagation:
             "Pipeline run failed to return results."
         )
         # With messiness=0.0, all records should be exact_match → should resolve to matched
-        results = result.get('results', [])
+        payload = result.get('results', {})
+        results = payload.get('transaction_results', []) if isinstance(payload, dict) else []
         exceptions = [r for r in results if r.get('final_status') not in (
             ReconciliationState.EXACT_MATCH.value,
             ReconciliationState.FUZZY_MATCH.value,

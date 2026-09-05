@@ -72,6 +72,24 @@ class MetricsEvaluator:
         gt_by_utr: Dict[str, Dict] = {}
         gt_by_bank_txn: Dict[str, Dict] = {}
 
+        if isinstance(results, dict):
+            # Structured PipelineResult: the pipeline has already separated
+            # transaction-level rows from event streams. Trust the separation
+            # (do NOT re-merge orphans/duplicates into the scored
+            # population); count each stream explicitly. Any rows inside
+            # exception_events that carry a settlement identity are scored
+            # as transaction units, the rest are counted as events.
+            transaction_seed = list(results.get('transaction_results', []))
+            orphan_stream = list(results.get('orphan_events', []))
+            duplicate_stream = list(results.get('duplicate_events', []))
+            exception_stream = list(results.get('exception_events', []))
+            results = transaction_seed + exception_stream
+            _pre_separated_orphans = orphan_stream
+            _pre_separated_duplicates = duplicate_stream
+        else:
+            _pre_separated_orphans = []
+            _pre_separated_duplicates = []
+
         for gt in self.ground_truth:
             if gt.get('payment_id'):
                 gt_by_payment[str(gt['payment_id']).lower()] = gt
@@ -87,6 +105,21 @@ class MetricsEvaluator:
         orphan_ledger_records = 0
         duplicate_suspects = 0
         demo_injected_count = 0
+
+        # Count pre-separated event streams (structured input only). These
+        # never enter the transaction denominator.
+        for res in _pre_separated_orphans:
+            if res.get('forced_demo_case'):
+                demo_injected_count += 1
+            t = res.get('type')
+            if t == ReconciliationState.UNMATCHED_BANK.value or t == 'unmatched_bank':
+                orphan_bank_records += 1
+            else:
+                orphan_ledger_records += 1
+        for res in _pre_separated_duplicates:
+            if res.get('forced_demo_case'):
+                demo_injected_count += 1
+            duplicate_suspects += 1
 
         for res in results:
             t = res.get('type')
@@ -491,11 +524,24 @@ def evaluate_cli():
 
     args = parser.parse_args()
 
-    if not os.path.exists(args.results):
-        print(f"Error: Results file not found at {args.results}")
+    results_path = args.results
+    if not os.path.exists(results_path):
+        # Fall back to the newest per-run artifact; the pipeline writes
+        # runtime/runs/<run-id>/results.json and never a root results.json.
+        import glob
+        candidates = sorted(
+            glob.glob(os.path.join("runtime", "runs", "*", "results.json")),
+            key=os.path.getmtime,
+        )
+        if candidates:
+            results_path = candidates[-1]
+            print(f"Results file not found at {args.results}; using {results_path}")
+
+    if not os.path.exists(results_path):
+        print(f"Error: Results file not found at {results_path}")
         return 1
 
-    with open(args.results, 'r') as f:
+    with open(results_path, 'r') as f:
         results = json.load(f)
 
     evaluator = MetricsEvaluator(ground_truth_path=args.ground_truth)

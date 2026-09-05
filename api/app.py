@@ -114,7 +114,7 @@ class ReconcileRequest(BaseModel):
     seed: int = Field(42, description="Random seed for deterministic reproducibility")
     messiness: float = Field(0.25, ge=0.0, le=1.0, description="Injected anomaly/messiness ratio")
     demo_disagreement: bool = Field(False, description="Inject one demo LLM-vs-deterministic disagreement (excluded from organic metrics)")
-    demo_disagreement: bool = Field(False, description="Deprecated alias for demo_disagreement")
+    force_disagreement: Optional[bool] = Field(None, description="Deprecated alias for demo_disagreement; prefer demo_disagreement")
     use_llm: bool = Field(True, description="Enable LLM for Stage 3 exception explanation and resolution proposals")
     settlements_path: str = Field("data/settlements_live.csv", description="Path to Razorpay settlements CSV")
     bank_path: str = Field("data/bank_statement.csv", description="Path to bank statement CSV")
@@ -196,7 +196,7 @@ def run_reconciliation(request: ReconcileRequest):
     try:
         pipeline = ReconciliationPipeline(
             use_llm=request.use_llm,
-            demo_disagreement_demo=bool(request.demo_disagreement or request.demo_disagreement)
+            demo_disagreement_demo=bool(request.demo_disagreement or request.force_disagreement)
         )
         
         results = pipeline.run(

@@ -21,18 +21,52 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from audit.store import AuditStore
 
 
-def load_results(results_path: Optional[str] = None) -> list:
-    """Load reconciliation results from JSON file checking configured env paths and fallbacks."""
+def load_results(results_path: Optional[str] = None) -> dict:
+    """Load reconciliation results, normalising legacy and structured payloads.
+
+    Returns a PipelineResult-style dict with transaction_results /
+    orphan_events / duplicate_events / exception_events. Legacy list
+    payloads are wrapped as transaction_results so old artifacts still render.
+    """
     target_path = results_path or os.getenv("RESULTS_PATH", "results.json")
-    if not os.path.exists(target_path):
-        for p in ["results.json", "demo_artifacts/results.json"]:
-            if os.path.exists(p):
-                target_path = p
+    candidates = [target_path, "results.json", "runtime/results.json",
+                  "demo_artifacts/results.json"]
+    # Also pick up the newest per-run artifact if no explicit path exists.
+    runs_dir = os.path.join("runtime", "runs")
+    if os.path.isdir(runs_dir):
+        try:
+            run_dirs = sorted(
+                (os.path.join(runs_dir, d) for d in os.listdir(runs_dir)),
+                key=os.path.getmtime,
+            )
+            for d in reversed(run_dirs):
+                candidates.append(os.path.join(d, "results.json"))
+        except OSError:
+            pass
+    payload = None
+    for p in candidates:
+        if p and os.path.exists(p):
+            try:
+                with open(p, 'r') as f:
+                    payload = json.load(f)
                 break
-    if not os.path.exists(target_path):
-        return []
-    with open(target_path, 'r') as f:
-        return json.load(f)
+            except Exception:
+                continue
+    if payload is None:
+        return {'transaction_results': [], 'orphan_events': [],
+                'duplicate_events': [], 'exception_events': []}
+    if isinstance(payload, list):
+        return {'transaction_results': payload, 'orphan_events': [],
+                'duplicate_events': [], 'exception_events': []}
+    if isinstance(payload, dict):
+        return {
+            'transaction_results': payload.get('transaction_results', []),
+            'orphan_events': payload.get('orphan_events', []),
+            'duplicate_events': payload.get('duplicate_events', []),
+            'exception_events': payload.get('exception_events', []),
+        }
+    return {'transaction_results': [], 'orphan_events': [],
+            'duplicate_events': [], 'exception_events': []}
 
 
 def load_metrics() -> dict:
@@ -68,7 +102,11 @@ def main():
     """)
     
     # Load data
-    results = load_results()
+    payload = load_results()
+    results = payload.get('transaction_results', [])
+    orphan_events = payload.get('orphan_events', [])
+    duplicate_events = payload.get('duplicate_events', [])
+    exception_events = payload.get('exception_events', [])
     metrics = load_metrics()
     audit_store = AuditStore()
     audit_stats = audit_store.get_summary_stats()
@@ -247,16 +285,25 @@ def main():
     st.divider()
     
     # Main content tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["All Results", "Exceptions", "Disagreements", "Audit Hash Chain"])
-    
+    tab1, tab1b, tab2, tab3, tab4 = st.tabs([
+        "Transaction Results", "Orphan & Duplicate Events",
+        "Exceptions", "Disagreements", "Audit Hash Chain",
+    ])
+
     with tab1:
-        st.subheader("All Reconciliation Results")
+        st.subheader("Transaction Results (one row = one input settlement)")
+        st.caption(
+            f"{len(results)} transaction results · {len(orphan_events)} orphan events · "
+            f"{len(duplicate_events)} duplicate events · {len(exception_events)} exception events. "
+            "Orphan/duplicate rows are events, not transactions — they never inflate match metrics."
+        )
         
         if results:
             # Flatten results for display
             flat_results = []
             for r in results:
                 flat = {
+                    'canonical_transaction_id': r.get('canonical_transaction_id') or r.get('evaluation_unit_id', ''),
                     'payment_id': r.get('payment_id', '') or r.get('record_ids', ''),
                     'status': r.get('final_status', ''),
                     'source': r.get('source', 'synthetic'),
@@ -271,7 +318,7 @@ def main():
             
             df = pd.DataFrame(flat_results)
             st.dataframe(df, use_container_width=True, hide_index=True)
-            
+
             csv_data = df.to_csv(index=False).encode('utf-8')
             st.download_button(
                 "📥 Download All_Results.csv",
@@ -281,6 +328,31 @@ def main():
             )
         else:
             st.info("No results loaded. Run the reconciliation pipeline first.")
+
+    with tab1b:
+        st.subheader("Orphan & Duplicate Events (not transactions)")
+        st.caption(
+            "Bank/ledger rows with no settlement counterpart, and duplicate-suspect "
+            "candidates. Shown separately so they cannot be mistaken for reconciled transactions."
+        )
+        event_rows = (
+            [{'event_kind': 'orphan', **e} for e in orphan_events]
+            + [{'event_kind': 'duplicate', **e} for e in duplicate_events]
+            + [{'event_kind': 'exception', **e} for e in exception_events]
+        )
+        if event_rows:
+            flat_events = []
+            for e in event_rows:
+                flat_events.append({
+                    'event_kind': e.get('event_kind', ''),
+                    'record_ids': e.get('record_ids', ''),
+                    'type': e.get('type', ''),
+                    'status': e.get('final_status', ''),
+                    'source': e.get('source', 'synthetic'),
+                })
+            st.dataframe(pd.DataFrame(flat_events), use_container_width=True, hide_index=True)
+        else:
+            st.info("No orphan or duplicate events in this run.")
     
     with tab2:
         st.subheader("Exceptions Requiring Review")
