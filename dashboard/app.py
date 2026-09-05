@@ -311,7 +311,7 @@ def main():
                     'source': r.get('source', 'synthetic'),
                     'type': r.get('type', ''),
                     'confidence': r.get('confidence', 0),
-                    'demo_flag': "🚨 FORCED DEMO" if r.get('forced_demo_case') else "standard",
+                    'demo_flag': "FORCED DEMO" if r.get('forced_demo_case') else "standard",
                     'llm_proposal': r.get('llm_proposed_action', ''),
                     'deterministic_recheck': r.get('deterministic_recheck_passed', ''),
                     'rejection_reason': r.get('rejection_reason', ''),
@@ -323,7 +323,7 @@ def main():
 
             csv_data = df.to_csv(index=False).encode('utf-8')
             st.download_button(
-                "📥 Download All_Results.csv",
+                "Download All_Results.csv",
                 data=csv_data,
                 file_name="All_Results.csv",
                 mime="text/csv"

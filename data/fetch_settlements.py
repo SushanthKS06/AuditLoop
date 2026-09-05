@@ -88,10 +88,16 @@ class RazorpayReconClient:
         
         data = response.json()
         
-        if not data or len(data) == 0:
+        # Razorpay API returns a dict with 'items' list
+        if isinstance(data, dict) and 'items' in data:
+            records = data['items']
+        else:
+            records = data
+            
+        if not records or len(records) == 0:
             return self._empty_dataframe()
         
-        return self._normalize_to_dataframe(data)
+        return self._normalize_to_dataframe(records)
     
     def _empty_dataframe(self) -> pd.DataFrame:
         """Return empty DataFrame with expected schema."""
