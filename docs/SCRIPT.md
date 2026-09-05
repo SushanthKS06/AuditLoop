@@ -15,8 +15,8 @@
 | **0:45 - 1:30** | **The Architectural Thesis** | Architecture diagram | *The LLM proposes; deterministic verifier disposes.* Never trust an LLM with money. |
 | **1:30 - 3:00** | **Live Pipeline Demo** | Streamlit Dashboard & Terminal | Stage 1 ($O(N+M+L)$ hash match), Stage 2 (fuzzy fee scoring), Stage 3 (Groq GPT-OSS 120B structured reasoning). |
 | **3:00 - 3:45** | **Failure Recovery & Disagreements** | Disagreements Tab & HITL Form | Fail-closed demonstration: LLM proposal rejected by deterministic re-verifier. Maker-checker human sign-off. |
-| **3:45 - 4:30** | **Cryptographic Auditability & Metrics** | `/audit/verify` API & SHA-256 Tab | Mathematical tamper-evidence with SHA-256 block hashing; ground truth metrics ($93.8\%$ precision). |
-| **4:30 - 5:00** | **Enterprise Scale & Closing** | API Docs & Terminal benchmarks | Scalable hash indexing, ~66.7% of records resolved at zero LLM cost, tamper-evident audit chain. |
+| **3:45 - 4:30** | **Cryptographic Auditability & Metrics** | `/audit/verify` API & SHA-256 Tab | Mathematical tamper-evidence with SHA-256 block hashing; machine-computed ground-truth metrics (precision/recall/F1 read live from the dashboard). |
+| **4:30 - 5:00** | **Enterprise Scale & Closing** | API Docs & Terminal benchmarks | Scalable hash indexing, deterministic-first resolution at zero LLM cost for the matched head, tamper-evident audit chain. |
 
 ---
 
@@ -86,7 +86,7 @@
 > If an internal DBA attempts to modify a row in SQLite or PostgreSQL, the cryptographic chain instantly breaks. 
 > Our automated `/audit/verify` REST endpoint recomputes hashes from genesis to head — providing the tamper-evident cryptographic foundation that compliance workflows like SOC2 or RBI reporting require. (Certification itself is a separate organizational process; we provide the audit-trail primitive it depends on.)
 > 
-> On the metrics side: the ground truth is generated alongside the synthetic batch by the same deterministic generator — this is disclosed, not hidden. The choice is deliberate: we wanted a verifiable, reproducible answer key rather than running the demo on unlabeled or cherry-picked data. The `messiness_ratio=0.40` parameter is what injects genuine ambiguity and prevents the scores from being trivially perfect. Every number on this dashboard is machine-computed against that answer key."*
+> On the metrics side: the ground truth is generated alongside the synthetic batch by the same deterministic generator — this is disclosed, not hidden. The choice is deliberate: we wanted a verifiable, reproducible answer key rather than running the demo on unlabeled or cherry-picked data. The `messiness_ratio=0.25` default is what injects genuine ambiguity and prevents the scores from being trivially perfect. The dashboard displays machine-computed metrics for the current reproducible run — current metrics are generated from the deterministic benchmark at runtime, never memorized from a past run."*
 
 ---
 
@@ -94,9 +94,9 @@
 **[Visual: Show FastAPI Swagger docs at `http://localhost:8000/docs` and Docker Compose]**
 
 > *"AuditLoop is packaged as a buildathon-ready prototype FastAPI service, an automated test suite, and Docker Compose profiles.
-> 
-> By running deterministic matching first, ~**66.7%** of records are resolved at zero LLM cost — the LLM is only invoked on the unresolved tail. *(Computed from `match_rate` in `metrics_report.json`; methodology: records resolved at Stage 1/2 ÷ total records.)*
-> 
+>
+> By running deterministic matching first, records resolved at Stage 1/2 cost zero LLM calls — the LLM is only invoked on the unresolved tail. The dashboard displays machine-computed metrics for the current reproducible run (methodology: records resolved at Stage 1/2 ÷ total records, read live from `metrics_report.json`).
+>
 > AuditLoop bridges the gap between state-of-the-art Generative AI and the strict mathematical guarantees required by modern finance. Thank you."*
 
 ---
@@ -104,7 +104,7 @@
 ## 🎯 Anticipated Judge & Panel Q&A Playbook
 
 ### Q1: "What happens if Groq's API goes down during a batch run?"
-> **Answer:** *"AuditLoop fails closed gracefully. If the LLM API times out or throws a 500/429 error, exceptions are immediately tagged as `unresolved_exception` or `llm_unavailable` and queued for reviewer inspection. Stage 1 and Stage 2 deterministic matches are completely unaffected and continue executing at wire speed."*
+> **Answer:** *"AuditLoop fails closed gracefully. If the LLM API times out or throws a 500/429 error, exceptions are immediately tagged as `unresolved_exception` or `llm_unavailable` and queued for reviewer inspection. Stage 1 and Stage 2 deterministic matches are completely unaffected and continue executing with zero LLM dependency."*
 
 ### Q2: "How do you protect sensitive customer PII from leaking into the LLM?"
 > **Answer:** *"Our privacy layer (`llm/privacy.py`) intercepts all exception records before prompt serialization. It scrubs emails, Indian phone numbers (`+91[6-9]...`), and customer names with regex and token masking, passing only sanitized structural keys (UTRs, amounts, timestamps, and order IDs) to the external LLM."*

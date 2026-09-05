@@ -116,9 +116,9 @@ class ReconcileRequest(BaseModel):
     demo_disagreement: bool = Field(False, description="Inject one demo LLM-vs-deterministic disagreement (excluded from organic metrics)")
     force_disagreement: Optional[bool] = Field(None, description="Deprecated alias for demo_disagreement; prefer demo_disagreement")
     use_llm: bool = Field(True, description="Enable LLM for Stage 3 exception explanation and resolution proposals")
-    settlements_path: str = Field("data/settlements_live.csv", description="Path to Razorpay settlements CSV")
-    bank_path: str = Field("data/bank_statement.csv", description="Path to bank statement CSV")
-    ledger_path: str = Field("data/internal_ledger.csv", description="Path to internal ledger CSV")
+    settlements_path: str = Field("data/fixtures/settlements_live.csv", description="Path to benchmark settlements CSV (synthetic fixtures; same default as CLI)")
+    bank_path: str = Field("data/fixtures/bank_statement.csv", description="Path to bank statement CSV (synthetic fixtures; same default as CLI)")
+    ledger_path: str = Field("data/fixtures/internal_ledger.csv", description="Path to internal ledger CSV (synthetic fixtures; same default as CLI)")
 
 
 class ReconcileResponse(BaseModel):

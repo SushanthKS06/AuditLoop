@@ -42,6 +42,7 @@ def load_results(results_path: Optional[str] = None) -> dict:
             for d in reversed(run_dirs):
                 candidates.append(os.path.join(d, "results.json"))
         except OSError:
+            # Best-effort run discovery: fall back to the static candidates.
             pass
     payload = None
     for p in candidates:
@@ -51,6 +52,7 @@ def load_results(results_path: Optional[str] = None) -> dict:
                     payload = json.load(f)
                 break
             except Exception:
+                # Unreadable/corrupt candidate: try the next path.
                 continue
     if payload is None:
         return {'transaction_results': [], 'orphan_events': [],

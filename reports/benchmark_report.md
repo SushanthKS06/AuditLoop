@@ -1,34 +1,38 @@
 # Adversarial Benchmark Report
 
-**Generated:** 2026-09-04T16:17:41.075810Z
 **Accuracy:** 100.0%
 
 ## Test Cases
 
 | Case ID | Description | Expected | Actual | Passed |
 |---------|-------------|----------|--------|--------|
-| case_1_exact | Clean exact 3-way match | `matched` | `matched` | ✅ |
-| case_2_fee_adjust | Bank has net, ledger has gross, fuzzy match catches fee | `matched` | `matched` | ✅ |
-| case_3_date_lag | Settlement delayed by 2 days, exact amount | `matched` | `matched` | ✅ |
-| case_4_missing_bank | Missing bank leg, should not match completely | `llm_deterministic_disagreement` | `llm_deterministic_disagreement` | ✅ |
-| case_5_formatting | Messy string formatting in amounts | `matched` | `matched` | ✅ |
-| case_6_rounding | Tiny rounding discrepancy in bank amount | `matched` | `matched` | ✅ |
-| case_7_strict_disagree | Amount diff is 10%, should reject | `llm_deterministic_disagreement` | `llm_deterministic_disagreement` | ✅ |
-| case_8_generic | Generic matching case 8 | `matched` | `matched` | ✅ |
-| case_9_generic | Generic matching case 9 | `matched` | `matched` | ✅ |
-| case_10_generic | Generic matching case 10 | `matched` | `matched` | ✅ |
-| case_11_generic | Generic matching case 11 | `matched` | `matched` | ✅ |
-| case_12_generic | Generic matching case 12 | `matched` | `matched` | ✅ |
-| case_13_generic | Generic matching case 13 | `matched` | `matched` | ✅ |
-| case_14_generic | Generic matching case 14 | `matched` | `matched` | ✅ |
-| case_15_generic | Generic matching case 15 | `matched` | `matched` | ✅ |
-| case_16_generic | Generic matching case 16 | `matched` | `matched` | ✅ |
-| case_17_generic | Generic matching case 17 | `matched` | `matched` | ✅ |
-| case_18_generic | Generic matching case 18 | `matched` | `matched` | ✅ |
-| case_19_generic | Generic matching case 19 | `matched` | `matched` | ✅ |
-| case_20_generic | Generic matching case 20 | `matched` | `matched` | ✅ |
-| case_21_generic | Generic matching case 21 | `matched` | `matched` | ✅ |
-| case_22_generic | Generic matching case 22 | `matched` | `matched` | ✅ |
-| case_23_generic | Generic matching case 23 | `matched` | `matched` | ✅ |
-| case_24_generic | Generic matching case 24 | `matched` | `matched` | ✅ |
-| case_25_generic | Generic matching case 25 | `matched` | `matched` | ✅ |
+| case_01_exact | Clean exact 3-way match | `matched` | `matched` | ✅ |
+| case_02_fuzzy_fee | Fee-adjusted fuzzy 3-way match | `matched` | `matched` | ✅ |
+| case_03_missing_bank | Missing bank leg cannot fully match | `incomplete_counterparts` | `incomplete_counterparts` | ✅ |
+| case_04_missing_ledger | Missing ledger leg cannot fully match | `incomplete_counterparts` | `incomplete_counterparts` | ✅ |
+| case_05_missing_both | Both counterparts missing | `explained_no_resolution` | `explained_no_resolution` | ✅ |
+| case_06_amount_mismatch | Amount mismatch with all legs present | `llm_deterministic_disagreement` | `llm_deterministic_disagreement` | ✅ |
+| case_07_currency_mismatch | Currency mismatch cannot match | `llm_deterministic_disagreement` | `llm_deterministic_disagreement` | ✅ |
+| case_08_formatting | Comma and rupee formatting | `matched` | `matched` | ✅ |
+| case_09_accounting_negative | Accounting parentheses are negative | `llm_deterministic_disagreement` | `llm_deterministic_disagreement` | ✅ |
+| case_10_rounding | Sub-1% rounding | `matched` | `matched` | ✅ |
+| case_11_duplicate_ids | Conflicting order IDs (duplicate suspect) | `incomplete_counterparts` | `incomplete_counterparts` | ✅ |
+| case_12_date_lag | Two-day settlement lag | `matched` | `matched` | ✅ |
+| case_13_whitespace_amount | Whitespace around amount | `matched` | `matched` | ✅ |
+| case_14_orphan_bank_only | Orphan bank with no settlement | `explained_no_resolution` | `explained_no_resolution` | ✅ |
+| case_15_orphan_ledger_only | Orphan ledger with no settlement | `explained_no_resolution` | `explained_no_resolution` | ✅ |
+| case_16_llm_match_rejected | LLM MATCH rejected by verifier | `llm_deterministic_disagreement` | `llm_deterministic_disagreement` | ✅ |
+| case_17_llm_partial_flag | LLM proposes flag_for_human (partial/uncertain) | `flagged_for_review` | `flagged_for_review` | ✅ |
+| case_18_malformed_llm | Malformed LLM JSON | `llm_parse_error` | `llm_parse_error` | ✅ |
+| case_19_schema_invalid_llm | Schema-invalid LLM JSON | `llm_parse_error` | `llm_parse_error` | ✅ |
+| case_20_llm_unavailable | LLM client returns invalid (unavailable) | `llm_parse_error` | `llm_parse_error` | ✅ |
+| case_21_low_confidence_llm | Low-confidence LLM MATCH proposal | `low_confidence` | `low_confidence` | ✅ |
+| case_22_prompt_injection | Prompt injection cannot bypass verifier | `llm_deterministic_disagreement` | `llm_deterministic_disagreement` | ✅ |
+| case_23_pii_still_matches | PII in narration still 3-way matches | `matched` | `matched` | ✅ |
+| case_24_timestamp_boundary | Date at 3-day window edge | `matched` | `matched` | ✅ |
+| case_25_large_amount | Very large amounts | `matched` | `matched` | ✅ |
+| case_26_zero_amount | Zero amounts with agreeing IDs | `matched` | `matched` | ✅ |
+| case_27_refund_negative | Refund negative bank vs positive ledger | `llm_deterministic_disagreement` | `llm_deterministic_disagreement` | ✅ |
+| case_28_partial_refund_review | Partial-refund string case stays conservative | `flagged_for_review` | `flagged_for_review` | ✅ |
+| case_29_prompt_reveal | Reveal-hidden-instructions narration | `matched` | `matched` | ✅ |
+| case_30_reproducible_exact | Reproducible duplicate of exact match | `matched` | `matched` | ✅ |
